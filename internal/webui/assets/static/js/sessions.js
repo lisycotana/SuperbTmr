@@ -1,0 +1,500 @@
+var _selectedSessionIds = new Set();
+
+function updateSessionBatchBar() {
+  var countEl = document.getElementById('session-batch-count');
+  var delBtn = document.getElementById('batch-del-btn');
+  var selAllBtn = document.getElementById('batch-sel-all');
+  var snapshot = (window._lastSessionsSnapshot || []).filter(function (s) { return s && s.id; });
+  var count = _selectedSessionIds.size;
+  var total = snapshot.length;
+  var allSelected = total > 0 && count >= total;
+  if (selAllBtn) {
+    selAllBtn.classList.toggle('all-checked', allSelected);
+    selAllBtn.title = allSelected ? t('section.batch.clearSelection') : t('section.batch.selectAll');
+    selAllBtn.disabled = total === 0;
+  }
+  if (countEl) {
+    if (count > 0) {
+      countEl.style.display = '';
+      countEl.textContent = t('batch.count.selected', { count: count });
+    } else {
+      countEl.style.display = 'none';
+      countEl.textContent = '';
+    }
+  }
+  if (delBtn) {
+    delBtn.disabled = count === 0;
+    delBtn.title = count > 0
+      ? tCount('batch.del.title.one', 'batch.del.title.other', { count: count })
+      : t('section.batch.deleteSelected');
+  }
+}
+
+function renderSessionGrid(sessions, bannerMsg) {
+  var grid = document.getElementById('session-grid');
+  if (!grid) return;
+  setLoadBanner(document.getElementById('session-load-banner'), bannerMsg);
+  grid.innerHTML = '';
+  // Unified grid: running + DEAD sessions now both come from /api/sessions
+  // (the registry retains exited sessions). DEAD tiles open the same terminal
+  // window in read-only mode — no separate history window.
+  var all = (sessions || []).slice();
+  if (all.length === 0) {
+    _selectedSessionIds.clear();
+    updateSessionBatchBar();
+    var empty = document.createElement('div');
+    empty.style.cssText = 'padding:8px 4px;font-size:0.85rem;color:#656d76';
+    empty.textContent = t('session.empty');
+    grid.appendChild(empty);
+    return;
+  }
+  all.forEach(function (s) {
+    var dead = !(s.status === 'running');
+    var sid = s.id || '';
+    var isSelected = _selectedSessionIds.has(sid);
+    var tile = document.createElement('div');
+    var tileClass = 'conn-tile sess-tile' + (dead ? ' archived' : '') + (isSelected ? ' batch-selected' : '');
+    tile.className = tileClass;
+    tile.setAttribute('data-sid', sid);
+    // Re-apply a pending notify_user highlight across re-renders.
+    if (sid && _uiNotifHighlights && _uiNotifHighlights[sid]) {
+      tile.classList.add('sess-notified');
+    }
+    var nm = String((s.name || '').trim());
+    var entryLine = nm && nm.indexOf('session-') !== 0 ? nm : displaySessionShort(s);
+    /* Status lamp at the left of the id: green while the session is up, red once
+       it is over. The reason still travels in the tooltip. */
+    var statusText = dead
+      ? t('session.status.dead', { reason: reasonLabel(s.reason) })
+      : t('session.status.running');
+    var statusIc =
+      '<span class="sess-status-ic ' + (dead ? 'is-dead' : 'is-live') + '" title="' +
+      escapeHtml(statusText) + '" role="img" aria-label="' +
+      escapeHtml(statusText) + '"></span>';
+
+    /* Approval lock: a state indicator that is also the switch. It sits in the
+       meta row with the lamp and the id, which is already the line that reads
+       "what state is this session in". Only live sessions can be gated — a DEAD
+       session has no input to gate. */
+    var gated = !!s.approval_mode;
+    var lockHtml = !dead
+      ? '<button type="button" class="sess-lock' + (gated ? ' is-on' : '') + '" ' +
+          'title="' + escapeHtml(gated ? t('review.disableTip') : t('review.enableTip')) + '" ' +
+          'aria-pressed="' + (gated ? 'true' : 'false') + '" ' +
+          'aria-label="' + escapeHtml(t('review.mode')) + '">' +
+          (gated ? SVG_LOCK_CLOSED : SVG_LOCK_OPEN) +
+        '</button>'
+      : '';
+
+    var actionCornerHtml =
+      '<button type="button" class="sess-x" title="Delete session" data-i18n-title="session.delete.title" aria-label="Delete session" data-i18n-aria="session.delete.title">' +
+        '<svg viewBox="0 0 12 12" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" d="M2 2l8 8M10 2L2 10"/></svg>' +
+      '</button>';
+
+    tile.innerHTML =
+      '<div class="conn-tile-stack">' +
+      actionCornerHtml +
+      '<div class="icon-wrap" title="' + escapeHtml(dead ? t('session.openHistory') : t('session.openTerminal')) + '"><span class="sess-terminal-ic">' + terminalIconImgHtml() + '</span></div>' +
+      '</div>' +
+      '<div class="sess-tile-body">' +
+      '<div class="sess-name-row">' +
+      '<input type="checkbox" class="sess-checkbox" title="Select session" data-i18n-title="session.aria.select" aria-label="Select session" data-i18n-aria="session.aria.select"' + (isSelected ? ' checked' : '') + '>' +
+      '<div class="sess-entry-line" role="button" tabindex="0" title="Rename session" data-i18n-title="session.aria.rename" aria-label="Rename session" data-i18n-aria="session.aria.rename">' + escapeHtml(entryLine) + '</div>' +
+      '</div>' +
+      '<div class="sess-meta-row">' +
+      statusIc +
+      lockHtml +
+      '<span class="sess-sid-line" role="button" tabindex="0" title="Copy session URL" data-i18n-title="session.aria.copyUrl" aria-label="Copy session URL" data-i18n-aria="session.aria.copyUrl">' + escapeHtml(sid) + '</span>' +
+      '</div>' +
+      reviewBadgeHtml(sid) +
+      '</div>' +
+      '<div class="sess-fwd-info" style="display:none;font-size:0.62rem;color:#656d76;margin-top:2px;text-align:center"></div>';
+
+    tile.title = (dead ? t('session.openHistory.tip') : t('session.openTerminal')) + ' · ' + sid;
+
+    var lockBtn = tile.querySelector('.sess-lock');
+    if (lockBtn) {
+      lockBtn.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSessionApproval(s, gated, lockBtn);
+      };
+    }
+
+    var sx = tile.querySelector('.sess-x');
+    var delConf = {
+      title: t('session.delete.title'),
+      message: t('session.delete.message', { name: entryLine }),
+      okText: t('common.delete'),
+      danger: true
+    };
+    if (sx) {
+      sx.onclick = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        confirmDialog(delConf).then(function (ok) {
+          if (!ok) return;
+          fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' })
+            .then(function (r) {
+              if (!r.ok && r.status !== 204) return r.json().then(function (er) { throw new Error((er && er.error) || 'HTTP ' + r.status); });
+              var w = getShellWindowBySid(s.id);
+              if (w) closeShellWindow(w);
+            })
+            .catch(function (err) { showCopyToast(t('toast.delete.failed', { msg: String(err.message || err) })); });
+        });
+      };
+    }
+
+    var checkbox = tile.querySelector('.sess-checkbox');
+    if (checkbox) {
+      checkbox.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      checkbox.addEventListener('click', function (e) {
+        // Do NOT preventDefault() here: that would revert the checkbox toggle.
+        e.stopPropagation();
+        if (checkbox.checked) _selectedSessionIds.add(sid);
+        else _selectedSessionIds.delete(sid);
+        tile.classList.toggle('batch-selected', checkbox.checked);
+        updateSessionBatchBar();
+      });
+    }
+
+    /* The sid copies what the button next to it used to: the session URL. The
+       button went because the id is already the thing you aim at. */
+    var sidEl = tile.querySelector('.sess-sid-line');
+    if (sidEl) {
+      var doCopy = function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        copyTextToClipboard(resourceUrlSession(sid)).then(function () { showCopyToast(); }).catch(function () { showCopyToast(t('toast.copy.failed')); });
+      };
+      sidEl.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      sidEl.addEventListener('click', doCopy);
+      sidEl.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        doCopy(e);
+      });
+    }
+
+    var nameEl = tile.querySelector('.sess-entry-line');
+    var doRename = function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var cur = String((s.name || '').trim());
+      if (cur.indexOf('session-') === 0) cur = '';
+      var input = prompt(t('session.prompt.rename'), cur);
+      if (input === null) return;
+      var newName = input.trim();
+      if (!newName || (cur && newName === cur)) { showCopyToast(t('session.toast.unchanged')); return; }
+      fetch('/api/sessions/' + encodeURIComponent(sid), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName })
+      })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (er) { throw new Error((er && er.error) || 'HTTP ' + r.status); });
+          showCopyToast(t('session.toast.renamed'));
+          // Local optimistic refresh; the server broadcast reconciles shortly.
+          var snap = (window._lastSessionsSnapshot || []).slice();
+          for (var i = 0; i < snap.length; i++) {
+            if (snap[i] && snap[i].id === sid) { snap[i].name = newName; }
+          }
+          applySessionsSnapshot(snap);
+        })
+        .catch(function (err) { showCopyToast(t('toast.rename.failed', { msg: (err.message || err) })); });
+    };
+    /* The name is the rename control: the pencil it replaced sat next to the sid
+       and read as "edit the id", which is not what it did. */
+    nameEl.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    nameEl.addEventListener('click', doRename);
+    nameEl.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      doRename(e);
+    });
+
+    tile.onclick = function (e) {
+      if (e.target.closest('.sess-x') || e.target.closest('.sess-checkbox') || e.target.closest('.sess-entry-line') || e.target.closest('.sess-sid-line') || e.target.closest('.sess-status-ic')) return;
+      clearSessNotified(sid); // opening the session acknowledges its notification highlight
+      focusSessionWindow(s.name || '', s.id, e, dead ? { readOnly: true } : null);
+    };
+    if (!dead) {
+      var fwdInfo = tile.querySelector('.sess-fwd-info');
+      var fwds = (window._lastForwards || []).filter(function(f) { return f.ssh_config === s.name; });
+      if (fwds.length > 0) {
+        fwdInfo.style.display = 'block';
+        fwdInfo.textContent = tCount('fwd.count.one', 'fwd.count.other', { count: fwds.length }) + ': ' + fwds.map(function(f){ return f.listen_addr + '\u2192' + f.target_addr; }).join(', ');
+      }
+    }
+    grid.appendChild(tile);
+  });
+  applyI18n(grid);
+  var liveIds = new Set(all.map(function(s) { return s.id; }));
+  _selectedSessionIds.forEach(function(id) {
+    if (!liveIds.has(id)) _selectedSessionIds.delete(id);
+  });
+  updateSessionBatchBar();
+}
+
+/** reviewBadgeHtml builds a session card's pending-review badge from the counts
+ *  already in hand.
+ *
+ *  The grid is rebuilt from scratch on every session frame, and submitting a
+ *  request emits one of those frames (the manager's list-change broadcast). A
+ *  badge painted only by a later pass was therefore wiped by the very frame that
+ *  announced the request: measured in a browser, the tab bar showed "1" while
+ *  the card stayed empty. Building the badge into the tile is what makes it
+ *  survive its own re-render. */
+function reviewBadgeHtml(sid) {
+  var n = (window._approvalCounts || {})[sid] || 0;
+  if (!n) return '<div class="sess-review" hidden></div>';
+  return '<div class="sess-review">' + escapeHtml(tCount('review.badge.one', 'review.badge.other', { count: n })) + '</div>';
+}
+
+/** Convert a live terminal window to read-only when its session becomes DEAD:
+ *  stop streaming/input while keeping the ordinary xterm screen and tabs. Also
+ *  surfaces a "dead" badge in the window title so the DEAD state is visible
+ *  inside the terminal window (not only on the session tile). Idempotent. */
+function lockWindowReadonly(win) {
+  if (!win) return;
+  win._lockedReadonly = true;
+  win._readOnly = true;
+  win._inputClosed = true;
+  setWindowDeadBadge(win);
+  var chans = win._channels || {};
+  Object.keys(chans).forEach(function (sid) {
+    var ch = chans[sid];
+    sendTerminalWatch(sid, false);
+    if (ch.term) {
+      ch.streamDone = true;
+      try { ch.term.options.readOnly = true; } catch (e) {}
+      try { ch.term.readOnly = true; } catch (e) {}
+    }
+    // Channel went live→DEAD with its history already fully painted: render the end
+    // marker here as well, so it shows even if the terminal_done frame was lost (e.g.
+    // the WS dropped before the server emitted it). Freshly opened DEAD channels have
+    // historyLoaded=false and get the marker from the bootstrap .finally instead, so
+    // we never paint before their persisted output lands.
+    if (ch.historyLoaded === true) showTerminalEndedMarker(win, ch);
+  });
+}
+
+/** Insert (once) a compact "dead" badge into a terminal window's title right
+ *  after the session-id group. Never disturbs layout — flex-shrink:0 and it
+ *  sits inside the existing .shell-window-title flex row. */
+function setWindowDeadBadge(win) {
+  if (!win) return;
+  if (win._deadBadgeAdded) return;
+  var title = win.querySelector('.shell-window-title');
+  if (!title) return;
+  win._deadBadgeAdded = true;
+  var st = document.createElement('span');
+  st.className = 'shell-dead-badge';
+  st.title = t('session.dead.badgeTitle');
+  st.textContent = t('session.dead.badge');
+  title.appendChild(st);
+}
+
+/** Append the terminal-end marker to one channel at most once. This is the single
+ *  choke point for the "ended" state: every path that observes a session/shell exiting
+ *  (live terminal_done frame, live window flipping to DEAD, or a freshly opened
+ *  DEAD/read-only channel after its history is restored) calls this once. It is gated
+ *  on ch.endedMarkPrinted, so the marker renders exactly once per channel no matter
+ *  how many events fire. */
+function showTerminalEndedMarker(win, ch) {
+  if (!ch || ch.endedMarkPrinted) return;
+  ch.endedMarkPrinted = true;
+  if (win && ch.tabEl) {
+    var eb = ch.tabEl.querySelector('.shell-channel-tab-ended');
+    if (eb) eb.style.display = '';
+  }
+  if (ch.term) {
+    try {
+      ch.term.writeln('\r\n\x1b[33m' + t('term.ended') + '\x1b[0m', function () {
+        shellTermScrollToBottomIfStuck(ch.term, true);
+      });
+    } catch (e) {
+      try { ch.term.writeln('\r\n\x1b[33m' + t('term.ended') + '\x1b[0m'); } catch (e2) {}
+      shellTermScrollToBottomIfStuck(ch.term, true);
+    }
+  }
+}
+
+/**
+ * toggleSessionApproval flips a session's approval gate.
+ *
+ * Turning it on asks for the threshold first: the number of approvers is the
+ * real control (superbtmr authenticates a deployment with one token, so it cannot
+ * prove who an approver is), and defaulting it silently to 1 would hide that.
+ * Turning it off cancels everything pending server-side, hence the confirmation.
+ */
+function toggleSessionApproval(s, gated, btn) {
+  if (!s || !s.id) return;
+  if (gated) {
+    confirmDialog({
+      title: t('review.disable.title'),
+      message: t('review.disable.msgSession', { session: displaySessionShort(s) }),
+      okText: t('review.disable.ok')
+    }).then(function (ok) {
+      if (!ok) return;
+      setSessionApproval(s.id, false).catch(function (e) {
+        showCopyToast(t('review.toast.failed', { msg: String(e.message || e) }));
+      });
+    });
+    return;
+  }
+  setSessionApproval(s.id, true).catch(function (e) {
+    showCopyToast('Failed: ' + String(e.message || e));
+  });
+}
+
+/** setSessionApproval PATCHes the gate. The session-list frame re-renders the
+ *  card, so no local state is kept here — the server is the single source.
+ *
+ *  No reviewer count is sent: review has one reviewer, so a number would be a
+ *  field with a single valid value.
+ */
+function setSessionApproval(sessionID, enabled) {
+  var body = enabled ? { enabled: true } : { enabled: false };
+  return fetch(sessionAPI(sessionID, '/approval'), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+    return r.json();
+  }).then(function (j) {
+    showCopyToast(enabled ? t('review.toast.on') : t('review.toast.off'));
+    // The server broadcasts the new session list (Manager.EnableApproval), and the
+    // WebSocket frame re-renders the cards. Nothing is refreshed locally: reading
+    // back here would be a second source of truth for the same state.
+    return j;
+  });
+}
+
+function applySessionsSnapshot(sessions) {
+  window._lastSessionsSnapshot = sessions;
+  renderSessionGrid(sessions, '');
+  loadForwards();
+  // Reconcile open ordinary shell windows with the retained registry:
+  //  - running parent → leave live
+  //  - DEAD parent → lock readonly, keep the window and tabs
+  //  - deleted parent → close the window
+  var sessionById = {};
+  (sessions || []).forEach(function (s) { if (s.id) sessionById[s.id] = s; });
+  // Reconcile EVERY open window — floating (shellWindowsEl) AND tiled
+  // (pane-grid). Iterating only the floating container left windows for
+  // deleted sessions open forever in the tiled workspace; allShellWins()
+  // is the single source of truth for "all open shell windows".
+  var wins = allShellWins();
+  for (var i = 0; i < wins.length; i++) {
+    var w = wins[i];
+    if (!w._parentSid || w._placeholder) continue;
+    var s = sessionById[w._parentSid];
+    if (!s) {
+      releaseSessionUIState(w._parentSid);
+      closeShellWindow(w);
+      continue;
+    }
+    if (s.status !== 'running') lockWindowReadonly(w);
+    // Approval mode is part of the session snapshot, so an open window reflects a
+    // switch flipped in another tab without needing its own request.
+    w._approvalNeed = s.approval_need || 1;
+    applyApprovalMode(w, !!s.approval_mode);
+  }
+  // Prune invisible client-side state for sessions that have left the
+  // server registry entirely, even if no window was open when they died.
+  pruneDeadSessionUIState(sessionById);
+  refreshAllWindowTabs();
+}
+
+/** Drop client-side maps for sessions no longer present in sessionById. */
+function pruneDeadSessionUIState(liveMap) {
+  if (!liveMap) return;
+  if (_uiNotifHighlights) {
+    Object.keys(_uiNotifHighlights).forEach(function(id) { if (!liveMap[id]) delete _uiNotifHighlights[id]; });
+  }
+  if (_selectedSessionIds && _selectedSessionIds.size) {
+    _selectedSessionIds.forEach(function(id) { if (!liveMap[id]) _selectedSessionIds.delete(id); });
+  }
+  if (window._shellLastActive) {
+    Object.keys(window._shellLastActive).forEach(function(id) { if (!liveMap[id]) delete window._shellLastActive[id]; });
+  }
+  if (window._pendingTerminalWatch) {
+    Object.keys(window._pendingTerminalWatch).forEach(function(id) { if (!liveMap[id]) delete window._pendingTerminalWatch[id]; });
+  }
+}
+
+/** Drop every client-side map keyed by a session id that no longer exists.
+ *  Windows are the visible half of the leak; these maps are the invisible
+ *  half (stale highlights, remembered tabs, queued watches). */
+function releaseSessionUIState(sid) {
+  if (!sid) return;
+  if (_uiNotifHighlights) delete _uiNotifHighlights[sid];
+  if (_selectedSessionIds) _selectedSessionIds.delete(sid);
+  if (window._shellLastActive) delete window._shellLastActive[sid];
+  if (window._pendingTerminalWatch) delete window._pendingTerminalWatch[sid];
+}
+
+/** Per-window tab refresh: fetch child shells for win's parent session and sync tabs.
+ *  Each window is independent — no shared loop state, no cross-contamination. */
+function refreshWindowTabs(win) {
+  if (!win || !win._parentSid) return;
+  fetch(sessionAPI(win._parentSid, '/shells'))
+    .then(function(r) { if (!r.ok) return; return r.json(); })
+    .then(function(j) {
+      if (!j || !j.shells) return;
+      syncWindowTabs(win, j.shells);
+    }).catch(function() {});
+}
+
+/** Notify all open windows that the global session list changed; each window independently
+ *  decides whether to refresh its own channel tabs. Covers tiled panes too. */
+function refreshAllWindowTabs() {
+  var wins = allShellWins();
+  for (var i = 0; i < wins.length; i++) {
+    refreshWindowTabs(wins[i]);
+  }
+}
+
+function syncWindowTabs(win, shells) {
+  var existing = win._channels || {};
+  if (win._readOnly) {
+    // DEAD view: render every retained shell snapshot as a read-only tab. Never
+    // prune on refresh (all snapshot shells report exited) and never send input.
+    (shells || []).forEach(function(s) {
+      var sid = s.shell_id || s.id;
+      if (!existing[sid]) createChannelTab(win, sid);
+    });
+    return;
+  }
+  var running = shells.filter(function(s) { return s.status === 'running'; });
+  var exited = shells.filter(function(s) { return s.status !== 'running'; });
+  // Add tabs for shells the window does not show yet. An already-exited shell is
+  // opened read-only: its stream is over, and a pipe channel exists precisely to
+  // run to exit, so its tab is the output the user asked for — not a corpse to
+  // sweep away.
+  exited.forEach(function(s) {
+    var sid = s.shell_id || s.id;
+    if (!existing[sid]) createChannelTab(win, sid, null, true);
+  });
+  // Primary shell tab is created on explicit open (session create / restore).
+  // Sync only adds additional shells so closing a tab does not recreate it on
+  // the next refresh.
+  running.forEach(function(s) {
+    var sid = s.shell_id || s.id;
+    if (!existing[sid] && sid !== win._primaryShellId) createChannelTab(win, sid);
+  });
+  // Prune tabs for shells the server no longer lists at all — closed elsewhere
+  // (MCP shell_close, another window). A shell that merely exited stays listed
+  // with its buffer, so its tab stays too; the primary (root) shell is never
+  // pruned here, because during teardown its exit can surface in a still-RUNNING
+  // list frame before the session flips to DEAD.
+  Object.keys(existing).forEach(function(sid) {
+    if (sid === win._primaryShellId) return;
+    var found = shells.some(function(s) { return (s.shell_id || s.id) === sid; });
+    if (!found && existing[sid]) closeChannelTab(win, sid);
+  });
+}
+
+/* Language switch: re-render the tiles from the snapshot in memory (no request). */
+onLangChange(function () { renderSessionGrid(window._lastSessionsSnapshot || [], ''); });
+

@@ -1,0 +1,376 @@
+package sshclient
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+)
+
+// ExecSession wraps an active SSH client session.
+type ExecSession struct {
+	client       *ssh.Client
+	session      *ssh.Session
+	Stdin        io.WriteCloser
+	Stdout       io.Reader
+	Stderr       io.Reader
+	done         chan struct{}
+	exitCode     int
+	err          error
+	ownClient    bool // if false, Close() does not close the underlying SSH client
+	extraClosers []io.Closer
+	// stdinMu serializes stdin writes with stdin teardown. x/crypto's channel
+	// does not tolerate a concurrent Write and CloseWrite (they race on the
+	// channel's EOF flag), and teardown can happen at any time.
+	stdinMu sync.Mutex
+}
+
+func closeIfCloser(r io.Reader) {
+	if c, ok := r.(io.Closer); ok {
+		c.Close()
+	}
+}
+
+// DrainClosers closes closers in reverse order, ignoring errors. Used on error
+// paths and session teardown for bastion chains.
+func DrainClosers(closers []io.Closer) {
+	for i := len(closers) - 1; i >= 0; i-- {
+		if closers[i] != nil {
+			closers[i].Close()
+		}
+	}
+}
+
+// setTCPKeepAlive enables kernel-level TCP probes so a genuinely severed link
+// eventually surfaces as an SSH transport error. Multiple unanswered probes are
+// required before the kernel drops the socket, avoiding the false positives of
+// an application-level SSH request/timeout watchdog. Internal in-memory
+// connections are silently left unchanged.
+func setTCPKeepAlive(conn net.Conn) {
+	tcp, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	_ = tcp.SetKeepAliveConfig(net.KeepAliveConfig{
+		Enable:   true,
+		Idle:     30 * time.Second,
+		Interval: 15 * time.Second,
+		Count:    4,
+	})
+}
+
+// StartWithConfig dials addr with the given SSH client config and starts a command.
+// If proxy is non-nil and enabled, the SSH connection is tunneled through a SOCKS5 proxy.
+func StartWithConfig(addr string, config *ssh.ClientConfig, proxy *Proxy, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
+	conn, err := DialConn(addr, proxy, config.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("ssh dial: %w", err)
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
+
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+
+	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// DialConn opens the underlying TCP connection to addr, optionally via a SOCKS5 proxy.
+// Exported so chain builders in other packages can reuse the direct/proxy dial path.
+func DialConn(addr string, proxy *Proxy, timeout time.Duration) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = defaultDialTimeout
+	}
+	if proxy != nil && proxy.Enabled() {
+		return dialProxy(proxy, addr, timeout)
+	}
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		// Annotate with target and timeout so a bare "i/o timeout" / "connectex ..."
+		// failure tells the user how long it waited and to where.
+		return nil, fmt.Errorf("connect %s (timeout %s): %w", addr, timeout, err)
+	}
+	setTCPKeepAlive(conn)
+	return conn, nil
+}
+
+// StartWithConn creates an SSH client over an existing net.Conn (e.g. net.Pipe)
+// and starts a command. Used for in-process connections without TCP.
+func StartWithConn(conn net.Conn, config *ssh.ClientConfig, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil ssh ClientConfig")
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, "inmem", config)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("ssh handshake: %w", err)
+	}
+	client := ssh.NewClient(c, chans, reqs)
+
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+
+	return startSession(client, session, command, args, pty, rows, cols, true)
+}
+
+// StartWithClient creates a new ExecSession on an existing SSH client without dialing.
+// The returned ExecSession has ownClient=false; Close() will not close the shared client.
+func StartWithClient(client *ssh.Client, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if client == nil {
+		return nil, fmt.Errorf("nil ssh Client")
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+	return startSession(client, session, command, args, pty, rows, cols, false)
+}
+
+// StartWithChain creates an ExecSession on a freshly-built SSH client (the chain
+// target) plus any intermediate bastion clients. The target client and all
+// intermediates are closed when the ExecSession closes. Used for ProxyJump/via
+// chains where the underlying *ssh.Client was established over a bastion's
+// direct-tcpip channel.
+func StartWithChain(client *ssh.Client, closers []io.Closer, command string, args []string, pty bool, rows, cols int) (*ExecSession, error) {
+	if client == nil {
+		DrainClosers(closers)
+		return nil, fmt.Errorf("nil ssh Client")
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		client.Close()
+		DrainClosers(closers)
+		return nil, fmt.Errorf("new session: %w", err)
+	}
+	es, err := startSession(client, session, command, args, pty, rows, cols, true)
+	if err != nil {
+		DrainClosers(closers)
+		return nil, err
+	}
+	es.extraClosers = closers
+	return es, nil
+}
+
+// startSession sets up pipes, optional PTY, starts the command, and returns an ExecSession.
+// When ownClient is false, error paths close session but not client.
+func startSession(client *ssh.Client, session *ssh.Session, command string, args []string, pty bool, rows, cols int, ownClient bool) (*ExecSession, error) {
+	closeClient := func() {
+		if ownClient {
+			client.Close()
+		}
+	}
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		session.Close()
+		closeClient()
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		session.Close()
+		closeClient()
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		closeIfCloser(stdout)
+		stdin.Close()
+		session.Close()
+		closeClient()
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if pty {
+		if err := session.RequestPty("xterm-256color", rows, cols, defaultPTYModes()); err != nil {
+			closeIfCloser(stderr)
+			closeIfCloser(stdout)
+			stdin.Close()
+			session.Close()
+			closeClient()
+			return nil, fmt.Errorf("request pty: %w", err)
+		}
+	}
+
+	var startErr error
+	if trimmed := strings.TrimSpace(command); trimmed == "" && len(args) == 0 {
+		if !pty {
+			// Pipe mode has no "give me a login shell" request: it can only exec a
+			// concrete command. Guessing one from THIS host's detector sends the
+			// local path (e.g. C:\Program Files\WindowsApps\…\pwsh.exe) to the
+			// remote sshd, which answers "command not found". Refuse instead.
+			err := fmt.Errorf("empty command in pipe mode: a pipe shell runs a command, not a login shell")
+			closeIfCloser(stderr)
+			closeIfCloser(stdout)
+			stdin.Close()
+			session.Close()
+			closeClient()
+			return nil, err
+		}
+		// PTY: the shell request lets the SERVER decide its login shell. The
+		// client never supplies one — a path from the local detector is only valid
+		// when the target is this host, and the client cannot ask which it is.
+		startErr = session.Shell()
+	} else {
+		startErr = session.Start(shellQuote(trimmed, args))
+	}
+	if startErr != nil {
+		closeIfCloser(stderr)
+		closeIfCloser(stdout)
+		stdin.Close()
+		session.Close()
+		closeClient()
+		return nil, fmt.Errorf("start command: %w", startErr)
+	}
+
+	es := &ExecSession{
+		client:    client,
+		session:   session,
+		Stdin:     stdin,
+		Stdout:    stdout,
+		Stderr:    stderr,
+		done:      make(chan struct{}),
+		ownClient: ownClient,
+	}
+
+	go func() {
+		es.err = session.Wait()
+		if es.err != nil {
+			if exitErr, ok := es.err.(*ssh.ExitError); ok {
+				es.exitCode = exitErr.ExitStatus()
+			}
+		}
+		close(es.done)
+	}()
+
+	return es, nil
+}
+
+// CloseReaders closes the stdout/stderr read sides so a reader goroutine stuck
+// on a transport that never reports EOF can be released. Used after the process
+// has exited, where the stream can no longer carry useful data.
+func (es *ExecSession) CloseReaders() {
+	closeIfCloser(es.Stdout)
+	closeIfCloser(es.Stderr)
+}
+
+// Done returns a channel that closes when the remote process exits.
+func (es *ExecSession) Done() <-chan struct{} {
+	return es.done
+}
+
+// ExitCode returns the process exit code after Done is closed.
+func (es *ExecSession) ExitCode() int {
+	return es.exitCode
+}
+
+// Aborted returns true if the session ended due to connection loss rather than a clean process exit.
+func (es *ExecSession) Aborted() bool {
+	return es.err != nil && !isExitError(es.err)
+}
+
+func isExitError(err error) bool {
+	_, ok := err.(*ssh.ExitError)
+	return ok
+}
+
+// ResizePty sends a window-change request for the session.
+func (es *ExecSession) ResizePty(rows, cols int) error {
+	return es.session.WindowChange(rows, cols)
+}
+
+// WriteStdin writes to the process stdin. Safe to race with Close/termination:
+// the write is serialized with the stdin teardown.
+func (es *ExecSession) WriteStdin(data []byte) (int, error) {
+	es.stdinMu.Lock()
+	defer es.stdinMu.Unlock()
+	return es.Stdin.Write(data)
+}
+
+// Signal sends a signal to the remote process.
+func (es *ExecSession) Signal(sig ssh.Signal) error {
+	return es.session.Signal(sig)
+}
+
+// closeStdin closes the stdin pipe, serialized with in-flight writes.
+func (es *ExecSession) closeStdin() {
+	es.stdinMu.Lock()
+	defer es.stdinMu.Unlock()
+	_ = es.Stdin.Close()
+}
+
+// Close forcefully terminates the session and underlying connection.
+// SSHClient returns the underlying SSH client, or nil for internal sessions.
+func (es *ExecSession) SSHClient() *ssh.Client { return es.client }
+
+func (es *ExecSession) Close() error {
+	es.closeStdin()
+	var firstErr error
+	if err := es.session.Close(); err != nil {
+		firstErr = err
+	}
+	if es.ownClient {
+		if err := es.client.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	DrainClosers(es.extraClosers)
+	es.extraClosers = nil
+	return firstErr
+}
+
+// CloseSessionOnly closes this session channel without touching the shared SSH client.
+func (es *ExecSession) CloseSessionOnly() error {
+	es.closeStdin()
+	return es.session.Close()
+}
+
+func shellQuote(command string, args []string) string {
+	parts := []string{quoteIfNeeded(command)}
+	for _, a := range args {
+		parts = append(parts, quoteIfNeeded(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+func quoteIfNeeded(s string) string {
+	if strings.ContainsAny(s, " \t\n\"'\\$|&;<>(){}[]*?#~`") {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
+// defaultPTYModes returns standard terminal modes for PTY sessions.
+func defaultPTYModes() ssh.TerminalModes {
+	return ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.ICRNL:         1,
+		ssh.ONLCR:         1,
+		ssh.OPOST:         1,
+		ssh.ISIG:          1,
+		ssh.ICANON:        1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+}

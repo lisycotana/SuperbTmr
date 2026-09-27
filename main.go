@@ -1,0 +1,400 @@
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime/debug"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"syscall"
+
+	"golang.org/x/term"
+
+	"github.com/lisycotana/SuperbTmr/internal/approval"
+	"github.com/lisycotana/SuperbTmr/internal/auth"
+	"github.com/lisycotana/SuperbTmr/internal/config"
+	"github.com/lisycotana/SuperbTmr/internal/forward"
+	"github.com/lisycotana/SuperbTmr/internal/logansi"
+	mcpmod "github.com/lisycotana/SuperbTmr/internal/mcp"
+	"github.com/lisycotana/SuperbTmr/internal/message"
+	"github.com/lisycotana/SuperbTmr/internal/session"
+	"github.com/lisycotana/SuperbTmr/internal/sshconfig"
+	"github.com/lisycotana/SuperbTmr/internal/sshserver"
+	"github.com/lisycotana/SuperbTmr/internal/storage"
+	"github.com/lisycotana/SuperbTmr/internal/webui"
+)
+
+// Build metadata. Release builds override these with -ldflags, e.g.
+//
+//	go build -ldflags "-X main.version=$(git describe --tags --always) \
+//	  -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%FT%TZ)"
+//
+// When they are not injected (plain `go build`, `go install pkg@v0.1.16`),
+// versionString falls back to the module version embedded by the Go toolchain,
+// so `superbtmr -version` always reports something truthful.
+var (
+	version = "dev"
+	commit  = ""
+	date    = ""
+)
+
+// versionString returns the build version, preferring the ldflags-injected tag
+// and falling back to the Go toolchain's embedded module version (which carries
+// the git tag for `go install module@version` builds).
+func versionString() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
+
+// printVersion writes the version line to w.
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "superbtmr %s", versionString())
+	if commit != "" {
+		fmt.Fprintf(w, " (commit %s)", commit)
+	}
+	if date != "" {
+		fmt.Fprintf(w, " built %s", date)
+	}
+	fmt.Fprintln(w)
+}
+
+func bindHostIsAll(bind string) bool {
+	switch strings.TrimSpace(bind) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
+	}
+}
+
+// nonLoopbackUnicastIPv4s lists unique IPv4 addresses on up, non-loopback interfaces.
+func nonLoopbackUnicastIPv4s() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			default:
+				continue
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			v4 := ip.To4()
+			if v4 == nil {
+				continue
+			}
+			s := v4.String()
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func logHTTPMain(base string, port int, lanIPv4 []string) {
+	slog.Info(base + "/")
+	for _, ip := range lanIPv4 {
+		slog.Info(fmt.Sprintf("http://%s:%d/", ip, port))
+	}
+}
+
+func main() {
+	cfg := config.Default()
+	flag.StringVar(&cfg.Host, "host", cfg.Host, "HTTP bind address (127.0.0.1 = loopback default; 0.0.0.0 = all interfaces)")
+	flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
+	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "Data directory for JSON storage (default: $SUPERBTMR_DATA_DIR or ~/.superbtmr)")
+	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log verbosity: debug|info|warn|error")
+	flag.BoolVar(&cfg.NoInternal, "no-internal", cfg.NoInternal, "Disable the built-in loopback SSH profile (no internal connection)")
+	flag.BoolVar(&cfg.MCPManageSSHConfigs, "mcp-manage-ssh-configs", cfg.MCPManageSSHConfigs, "Enable MCP tools to create/edit/delete SSH configs (off by default; passwords/keys are never exposed)")
+	flag.StringVar(&cfg.AuthToken, "auth-token", cfg.AuthToken, "HTTP authentication token (or $SUPERBTMR_AUTH_TOKEN)")
+	flag.StringVar(&cfg.AuthHash, "auth-hash", cfg.AuthHash, "Salted SHA-256 HTTP token hash (or $SUPERBTMR_AUTH_HASH; generate with 'superbtmr --gen-auth-hash')")
+	flag.BoolVar(&cfg.DisableAuth, "disable-auth", cfg.DisableAuth, "Disable HTTP authentication entirely, even on non-loopback binds (or SUPERBTMR_DISABLE_AUTH_TOKEN=1). Errors out if a token or hash is also configured.")
+	flag.BoolVar(&cfg.MCPDeferTools, "mcp-defer-tools", cfg.MCPDeferTools, "Mark low-frequency MCP tools with defer_loading so clients fetch them on demand. Off by default: every tool is listed eagerly, which is what clients without deferred-tool support (e.g. Codex behind a gateway) need.")
+	var genAuthHash bool
+	flag.BoolVar(&genAuthHash, "gen-auth-hash", false, "Generate the salted SHA-256 hash of a token for --auth-hash / $SUPERBTMR_AUTH_HASH, then exit (token from an argument, or from stdin without echo on a terminal)")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "Print version, commit, and build date, then exit")
+	flag.Parse()
+
+	if showVersion {
+		printVersion(os.Stdout)
+		return
+	}
+
+	if genAuthHash {
+		if err := runGenAuthHash(flag.Args()); err != nil {
+			fmt.Fprintf(os.Stderr, "gen-auth-hash: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	cfg.ApplyEnv()
+
+	if args := flag.Args(); len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "unknown arguments: %s\n", strings.Join(args, " "))
+		os.Exit(2)
+	}
+
+	// Data dir precedence: --data-dir flag > $SUPERBTMR_DATA_DIR > ~/.superbtmr.
+	// A fixed per-user location keeps storage in one predictable place no
+	// matter where the binary is installed or from which directory it runs.
+	if cfg.DataDir == "" {
+		dir, err := config.DefaultDataDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot resolve default data dir: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.DataDir = dir
+	}
+	// Fail fast when the data directory cannot be created or written.
+	if err := ensureWritableDir(cfg.DataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "data dir %q is not writable: %v\n", cfg.DataDir, err)
+		os.Exit(1)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)
+		os.Exit(2)
+	}
+
+	var verifier *auth.Verifier
+	if cfg.AuthToken != "" || cfg.AuthHash != "" {
+		v, err := auth.NewVerifier(cfg.AuthToken, cfg.AuthHash)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid auth config: %v\n", err)
+			os.Exit(2)
+		}
+		verifier = v
+	}
+
+	slog.SetDefault(slog.New(buildLogHandler(cfg)))
+	slog.Info("superbtmr server started", "version", versionString())
+
+	// Start internal SSH server (in-process, no TCP port) unless disabled.
+	var sshSrv *sshserver.Server
+	if !cfg.NoInternal {
+		sshSrv = sshserver.New()
+		if err := sshSrv.Start(); err != nil {
+			slog.Error("failed to start SSH server", "err", err)
+			os.Exit(1)
+		}
+	}
+	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
+
+	if verifier != nil {
+		slog.Info("HTTP authentication: enabled (API/MCP: Authorization: Bearer <token>; browsers: native login prompt, token as password)")
+	} else if cfg.DisableAuth {
+		slog.Warn("HTTP authentication: DISABLED on purpose (--disable-auth / $" + config.EnvDisableAuth + "); anyone who can reach this port can drive every session")
+	} else {
+		slog.Info("HTTP authentication: disabled (loopback-only bind)")
+	}
+
+	slog.Info("MCP HTTP:")
+	slog.Info("    /sse SSE transport")
+	slog.Info("    /stream (streamable HTTP per MCP spec, e.g. Open WebUI)")
+	slog.Info("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ")
+
+	// Initialize storage and managers
+	store := storage.New(cfg.DataDir)
+	msgMgr := message.NewManager(store)
+	sessMgr := session.NewManager(msgMgr, store, sshSrv)
+	if err := sessMgr.RestoreDead(); err != nil {
+		slog.Warn("failed to restore previous DEAD sessions", "err", err)
+	}
+
+	sshStore := sshconfig.NewStore(cfg.DataDir)
+
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	mux := http.NewServeMux()
+	mainSrv := &http.Server{Addr: addr, Handler: mux}
+
+	forwardMgr := forward.NewForwardManager()
+
+	mcpOpts := []mcpmod.Option{mcpmod.WithHTTPServer(mainSrv)}
+	if cfg.MCPDeferTools {
+		// Opt-in: tag low-frequency tools defer_loading so clients fetch their
+		// schemas on demand. Off by default because clients that drop the marker
+		// (any Codex talking through a gateway, for instance) would lose those
+		// tools entirely rather than merely load them later.
+		mcpOpts = append(mcpOpts, mcpmod.DeferTools())
+	}
+	mcpSrv := mcpmod.New(sessMgr, msgMgr, sshStore, forwardMgr, versionString(), mcpOpts...)
+	// Same embedded docs the Web UI serves over HTTP become MCP resources/prompts.
+	mcpSrv.SetDocsFS(webui.Assets())
+	mcpSrv.NoInternal = cfg.NoInternal
+	if cfg.MCPManageSSHConfigs {
+		mcpSrv.RegisterSSHConfigWriteTools()
+	}
+	mux.Handle("GET /sse", mcpSrv.SSEHandler())
+	mux.Handle("POST /message", mcpSrv.MessageHandler())
+	mux.Handle("/stream", mcpSrv.StreamableHTTPHandler())
+	webuiH := &webui.Handler{Sessions: sessMgr, SSH: sshStore, ForwardMgr: forwardMgr, NotifyMgr: mcpSrv.NotifyManager(), NoInternal: cfg.NoInternal}
+	// File transfers and port forwards are held by the same review queue as
+	// command lines, but the operations live with the MCP server (it owns the
+	// SFTP and forward machinery). The Web UI decides; this is how its decision
+	// gets replayed where the operation is implemented.
+	webuiH.ExecuteOperation = mcpSrv.ExecuteApprovedOperation
+	webuiH.Register(mux)
+	// Bridge the MCP notify_user tool to the browser UI (toast/highlight push).
+	mcpSrv.SetUINotifier(webuiH.BroadcastUINotify)
+
+	// An approval decision must also wake an agent parked on shell_notify, so it
+	// learns the outcome without polling. Fan-out stays in one place: the web UI
+	// keeps its own listener (installed in Register) and this one forwards the
+	// same transitions to the notify subsystem's rules.
+	sessMgr.AddApprovalListener(func(sessionID string, req approval.Request) {
+		if req.ShellID != "" {
+			mcpSrv.NotifyManager().OnApprovalChange(req.ShellID, "approval "+string(req.State))
+		}
+	})
+	if verifier != nil {
+		mainSrv.Handler = auth.Middleware(verifier, mux)
+	}
+
+	host := strings.TrimSpace(cfg.Host)
+	base := fmt.Sprintf("http://%s:%d", host, cfg.Port)
+	var lan []string
+	if bindHostIsAll(host) {
+		lan = nonLoopbackUnicastIPv4s()
+	}
+	logHTTPMain(base, cfg.Port, lan)
+
+	var shuttingDown atomic.Bool
+
+	// Handle graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		shuttingDown.Store(true)
+		slog.Info("shutting down")
+		// Disconnect ≠ delete: DEAD all running sessions (retain history) instead
+		// of killing/clearing every shell.
+		sessMgr.MarkAllDead()
+		if sshSrv != nil {
+			sshSrv.Stop()
+		}
+		mcpSrv.Stop()
+		// The store keeps a shell's log open for appending; close it so the last
+		// bytes are durable and no handle outlives the process.
+		if err := store.Close(); err != nil {
+			slog.Warn("closing output logs", "err", err)
+		}
+	}()
+
+	if err := mcpSrv.Start(addr); err != nil {
+		if shuttingDown.Load() && errors.Is(err, http.ErrServerClosed) {
+			slog.Info("server stopped")
+			return
+		}
+		slog.Error("failed to start MCP server", "err", err)
+		os.Exit(1)
+	}
+}
+
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	probe := filepath.Join(dir, ".write-probe")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return os.Remove(probe)
+}
+
+func runGenAuthHash(args []string) error {
+	var token string
+	switch len(args) {
+	case 0:
+		t, err := readTokenFromStdin()
+		if err != nil {
+			return err
+		}
+		token = t
+	case 1:
+		token = args[0]
+	default:
+		return errors.New("too many arguments: expected at most one token")
+	}
+	if token == "" {
+		return errors.New("token must not be empty")
+	}
+	hash, err := auth.Hash(token)
+	if err != nil {
+		return err
+	}
+	fmt.Println(hash)
+	return nil
+}
+
+func readTokenFromStdin() (string, error) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprint(os.Stderr, "Token: ")
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", fmt.Errorf("read token: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("read token from stdin: %w", err)
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
+}
+
+func buildLogHandler(cfg *config.Config) slog.Handler {
+	var minLevel slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		minLevel = slog.LevelDebug
+	case "warn":
+		minLevel = slog.LevelWarn
+	case "error":
+		minLevel = slog.LevelError
+	default:
+		minLevel = slog.LevelInfo
+	}
+	color := term.IsTerminal(int(os.Stderr.Fd()))
+	return logansi.NewTextHandler(os.Stderr, logansi.Options{MinLevel: minLevel, Color: color})
+}

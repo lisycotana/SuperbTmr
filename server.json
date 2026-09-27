@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.lisycotana/superbtmr",
+  "description": "An MCP server that lets AI agents act like a human at a real terminal, local or over SSH.",
+  "repository": {
+    "url": "https://github.com/lisycotana/SuperbTmr",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/lisycotana/superbtmr:1.0.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:18765/stream"
+      }
+    }
+  ]
+}

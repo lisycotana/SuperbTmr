@@ -1,0 +1,3 @@
+# superbtmr loopback SSH config (TOML)
+kind = "internal"
+description = "Built-in superbtmr loopback SSH (no host credentials)."

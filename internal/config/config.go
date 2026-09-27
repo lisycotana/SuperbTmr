@@ -1,0 +1,138 @@
+package config
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// EnvDataDir overrides the default data directory when set.
+const EnvDataDir = "SUPERBTMR_DATA_DIR"
+
+// EnvAuthToken / EnvAuthHash configure HTTP authentication from the
+// environment. Flags take precedence over these when both are set.
+const (
+	EnvAuthToken = "SUPERBTMR_AUTH_TOKEN"
+	EnvAuthHash  = "SUPERBTMR_AUTH_HASH"
+)
+
+// EnvDisableAuth turns HTTP authentication off from the environment. It is the
+// explicit escape hatch for hosts where network reachability is already the
+// access control (loopback, container-internal only, trusted lab LAN).
+const EnvDisableAuth = "SUPERBTMR_DISABLE_AUTH_TOKEN"
+
+// Config holds all runtime configuration for the server.
+type Config struct {
+	Host                string // HTTP server bind address (default: "127.0.0.1" = loopback; use 0.0.0.0 for all interfaces)
+	Port                int    // HTTP server port, must be 1-65535 (default: 18765)
+	DataDir             string // persistent storage directory; empty means default ($SUPERBTMR_DATA_DIR or ~/.superbtmr)
+	LogLevel            string // log verbosity: debug|info|warn|error (default: "info")
+	NoInternal          bool   // disable the built-in loopback SSH profile
+	MCPManageSSHConfigs bool   // enable MCP tools for creating/editing/deleting SSH configs (default: false)
+	AuthToken           string // plaintext HTTP auth token ($SUPERBTMR_AUTH_TOKEN); mutually exclusive with AuthHash
+	AuthHash            string // salted SHA-256 token hash ($SUPERBTMR_AUTH_HASH); generate with `superbtmr --gen-auth-hash`
+	DisableAuth         bool   // force HTTP authentication off (--disable-auth / $SUPERBTMR_DISABLE_AUTH_TOKEN)
+	MCPDeferTools       bool   // opt-in: mark low-frequency MCP tools defer_loading; off lists every tool eagerly
+}
+
+// Default returns a Config with sensible defaults.
+func Default() *Config {
+	return &Config{
+		Host:     "127.0.0.1",
+		Port:     18765,
+		DataDir:  "", // resolved to $SUPERBTMR_DATA_DIR or ~/.superbtmr at startup
+		LogLevel: "info",
+	}
+}
+
+// DefaultDataDir resolves the default data directory: $SUPERBTMR_DATA_DIR when
+// set, otherwise ~/.superbtmr. A fixed per-user location keeps sessions and SSH
+// configs in one place regardless of where the binary lives or runs from.
+func DefaultDataDir() (string, error) {
+	if env := strings.TrimSpace(os.Getenv(EnvDataDir)); env != "" {
+		return filepath.Clean(env), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".superbtmr"), nil
+}
+
+// ApplyEnv fills unset auth fields from the corresponding environment
+// variables. The caller should invoke this after parsing flags: a non-empty
+// flag value therefore wins over the environment.
+func (c *Config) ApplyEnv() {
+	if c.AuthToken == "" {
+		c.AuthToken = strings.TrimSpace(os.Getenv(EnvAuthToken))
+	}
+	if c.AuthHash == "" {
+		c.AuthHash = strings.TrimSpace(os.Getenv(EnvAuthHash))
+	}
+	if !c.DisableAuth && envTruthy(os.Getenv(EnvDisableAuth)) {
+		c.DisableAuth = true
+	}
+}
+
+// envTruthy reports whether an environment variable was set to an affirmative
+// value. "0", "false", "no" and "off" (any case) mean "not set" so that
+// `SUPERBTMR_DISABLE_AUTH_TOKEN=0` cannot surprise an operator into an open server.
+func envTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// Validate checks that all fields are within valid ranges. A non-loopback
+// listener must be protected by an auth token or hash; loopback-only binds
+// retain the convenient unauthenticated development default.
+func (c *Config) Validate() error {
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", c.Port)
+	}
+	if c.DataDir == "" {
+		return fmt.Errorf("data_dir must not be empty")
+	}
+	switch c.LogLevel {
+	case "", "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("log_level must be one of debug|info|warn|error, got %q", c.LogLevel)
+	}
+	if c.AuthToken != "" && c.AuthHash != "" {
+		return fmt.Errorf("auth-token and auth-hash are mutually exclusive")
+	}
+	// Disabling auth is a deliberate operator decision, so it never silently
+	// wins: supplying credentials *and* asking for no auth is a configuration
+	// mistake and reported instead of guessed at.
+	if c.DisableAuth {
+		switch {
+		case c.AuthToken != "":
+			return fmt.Errorf("auth is disabled (--disable-auth / $%s) but --auth-token / $%s is also set; remove one of them", EnvDisableAuth, EnvAuthToken)
+		case c.AuthHash != "":
+			return fmt.Errorf("auth is disabled (--disable-auth / $%s) but --auth-hash / $%s is also set; remove one of them", EnvDisableAuth, EnvAuthHash)
+		}
+		return nil
+	}
+	if isNonLoopbackBind(c.Host) && c.AuthToken == "" && c.AuthHash == "" {
+		return fmt.Errorf("non-loopback host %q requires --auth-token, --auth-hash, SUPERBTMR_AUTH_TOKEN, or SUPERBTMR_AUTH_HASH (or pass --disable-auth / %s=1 to run open on purpose)", c.Host, EnvDisableAuth)
+	}
+	return nil
+}
+
+func isNonLoopbackBind(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		return true
+	}
+	if parsed := net.ParseIP(strings.Trim(host, "[]")); parsed != nil {
+		return !parsed.IsLoopback()
+	}
+	// Hostnames can resolve differently at runtime; conservatively require
+	// authentication unless they are the explicit loopback names.
+	return !strings.EqualFold(host, "localhost")
+}

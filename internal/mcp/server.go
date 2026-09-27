@@ -1,0 +1,524 @@
+package mcp
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"net"
+	"net/http"
+	"time"
+
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/lisycotana/SuperbTmr/internal/forward"
+	"github.com/lisycotana/SuperbTmr/internal/message"
+	"github.com/lisycotana/SuperbTmr/internal/notify"
+	"github.com/lisycotana/SuperbTmr/internal/session"
+	"github.com/lisycotana/SuperbTmr/internal/sshconfig"
+)
+
+// mcpServerInstructions is returned in initialize (MCP "instructions") so clients may
+// inject it into the model context. Keep it terse because clients may include it
+// in every model turn.
+const mcpServerInstructions = `superbtmr agent rules:
+
+0) Tools: session_*/shell_* are standalone; forward/message/ssh_config and file_perm/file_link/file_fs take an "action" parameter (enum in each schema).
+1) IDs: session_id = connection container (forwards, files, terminate, shell_open); shell_id = terminal channel (input/key/output/resize/close, readers). Never invent them; take from session_start / shell_open / list tools. superbtmr:// locators from the user ("superbtmr://mac" entry, "superbtmr://#<sid>" session, "superbtmr://#<sid>:N" shell) are accepted in place of ssh_config names, session_id, shell_id — use verbatim, no lookups.
+2) Mode: interactive shell (omit command/args, DEFAULT) for multi-step/stateful work; drive via shell_input + shell_key(enter) + shell_output(timeout≤3) loops. shell_output returns ONLY new bytes: empty ≠ done, keep polling. Dedicated command (command/args set) ONLY for REPL/TUI, daemons, or one atomic script. Never split sequential steps into session_start(bash -c) calls (loses cwd/env, wastes handshakes).
+3) After discovery, act with concrete calls, not prose. Verify success via output or an explicit success field.
+4) Lifecycle: session_terminate closes a session (shells + SSH + forwards) but keeps it in the registry as exited/DEAD, output still readable via shell_output; session_delete erases it for good. force=true = immediate kill. shell_close closes one channel only.
+5) Password/sudo/passphrase/MFA prompt: stop and ask user to type it in superbtmr Web UI. Never guess, paste, or echo secrets.
+6) Other keys use JSON \u001b escapes in shell_input. Repeating traceback → session_terminate, retry with PYTHON_BASIC_REPL=1. Silent hang → session_info.
+7) forward(action=local/remote/dynamic) = ssh -L/-R/-D, all take session_id. ssh_config(action=list) only returns names; never expose credentials.
+8) shell_notify(action=register, shell_id, channel="resource"|"sampling", event="output"|"exit"|"silence") = async wake-up (no payload); poll shell_output when woken.
+9) notify_user(message, level, session_id?) toasts the human's Web UI (not the Agent); shell_notify wakes the Agent.`
+
+// Server wraps the MCP SSE server, streamable HTTP handler, and tool handlers.
+type Server struct {
+	mcpServer       *mcpserver.MCPServer
+	sseServer       *mcpserver.SSEServer
+	streamServer    *mcpserver.StreamableHTTPServer
+	sessMgr         *session.Manager
+	msgMgr          *message.Manager
+	sshConfigs      *sshconfig.Store
+	forwardMgr      *forward.ForwardManager
+	notifyMgr       *notify.Manager
+	baseURL         string                // http://host:port, set from Start()
+	docsFS          fs.FS                 // embedded agent docs, set via SetDocsFS
+	NoInternal      bool                  // when true, hide and refuse the built-in loopback profile
+	sshConfigWrites bool                  // expose write actions on the unified ssh_config tool
+	deferTools      bool                  // opt-in: tag low-frequency tools defer_loading (default: list every tool eagerly)
+	sseOpts         []mcpserver.SSEOption // forwarded to the mcp-go SSE transport
+
+	// uiNotify delivers a user-facing notification to the Web UI (the notify_user
+	// tool). Set by main to webui.Handler.BroadcastUINotify so this package stays
+	// decoupled from webui. Returns the number of open tabs that received it.
+	uiNotify func(level, title, message, sessionID string, durationSec int) int
+}
+
+// Option customizes a Server at construction time. Options keep New's signature
+// stable for callers (and tests) that do not care about the newer knobs.
+type Option func(*Server)
+
+// WithHTTPServer hands the mcp-go SSE transport the http.Server it should attach
+// to, so the SSE and streamable-HTTP handlers share superbtmr's listener.
+func WithHTTPServer(h *http.Server) Option {
+	return func(s *Server) { s.sseOpts = append(s.sseOpts, mcpserver.WithHTTPServer(h)) }
+}
+
+// shouldDeferTool reports whether a tool's schema may be withheld from the
+// initial tools/list. The classification lives in deferredTools; the switch
+// lives on the Server, so this is the single decision point for both the tools
+// registered in New and the ones added later by RegisterSSHConfigWriteTools.
+func (s *Server) shouldDeferTool(name string) bool {
+	if !s.deferTools {
+		return false
+	}
+	return deferredTools[name]
+}
+
+// DeferTools lists low-frequency MCP tools with defer_loading so clients can
+// fetch their schemas on demand, trimming the initial tools/list payload.
+//
+// Opt-in, and off by default: clients that ignore the marker — or reach superbtmr
+// through a gateway that drops it — would otherwise see those tools vanish
+// entirely. Enabling it trades a larger initial tools/list for a smaller one.
+func DeferTools() Option {
+	return func(s *Server) { s.deferTools = true }
+}
+
+// SendResourceNotification broadcasts an MCP resource update event.
+func (s *Server) SendResourceNotification(ctx context.Context, shellID string) error {
+	uri := ResourceURLScheme + "shells/" + shellID
+	s.mcpServer.SendNotificationToAllClients("notifications/resources/updated", map[string]any{
+		"uri": uri,
+	})
+	return nil
+}
+
+// SendSamplingNotification issues an MCP sampling/createMessage request to the
+// client session that registered the rule, waking the AI. target is the opaque
+// handle captured by shell_notify(action=register); notifications are dispatched
+// from timer/exit goroutines, so the client session cannot be recovered from the
+// dispatch context and must be carried on the rule.
+func (s *Server) SendSamplingNotification(ctx context.Context, shellID string, target any, event notify.Event, status string) error {
+	sess, ok := target.(mcpserver.SessionWithSampling)
+	if !ok || sess == nil {
+		return fmt.Errorf("no sampling-capable client session for shell %q", shellID)
+	}
+	prompt := fmt.Sprintf("[superbtmr reminder] Shell '%s' emitted event '%s' (status: %s). Inspect output via shell_output if needed.", shellID, event, status)
+	req := mcpgo.CreateMessageRequest{
+		CreateMessageParams: mcpgo.CreateMessageParams{
+			SystemPrompt: "superbtmr notification daemon",
+			Messages: []mcpgo.SamplingMessage{
+				{
+					Role:    mcpgo.RoleUser,
+					Content: mcpgo.NewTextContent(prompt),
+				},
+			},
+			MaxTokens: 50,
+		},
+	}
+	_, err := sess.RequestSampling(ctx, req)
+	return err
+}
+
+// SetUINotifier wires the Web UI notification delivery end (notify_user tool).
+func (s *Server) SetUINotifier(fn func(level, title, message, sessionID string, durationSec int) int) {
+	s.uiNotify = fn
+}
+
+// NotifyManager exposes the shell notification rule manager so other subsystems
+// (e.g. the Web UI) can list and unregister rules. May return nil in tests that
+// construct a bare Server.
+func (s *Server) NotifyManager() *notify.Manager {
+	return s.notifyMgr
+}
+
+// New creates and configures the MCP server with all tools registered.
+// sshConfigs may be nil (session_start / ssh_config(action=list) will error or return empty).
+// version is the build version reported in initialize's serverInfo (main passes the
+// same value `superbtmr --version` prints); an empty string falls back to "dev".
+// opts tune the server: DeferTools() lazily loads low-frequency tools, and
+// WithHTTPServer() attaches the shared http.Server to the SSE transport.
+func New(sessMgr *session.Manager, msgMgr *message.Manager, sshConfigs *sshconfig.Store, forwardMgr *forward.ForwardManager, version string, opts ...Option) *Server {
+	if version == "" {
+		version = "dev"
+	}
+	// Port forwards are bound to a session's SSH transport: when a session goes
+	// DEAD (terminate/exit/lost connection) every forward of that session must be
+	// released, or its local listener lingers as a dead endpoint. The session
+	// manager does not know the forward manager, so wire the cascade here at the
+	// composition point shared by the MCP and Web UI surfaces.
+	if sessMgr != nil && forwardMgr != nil {
+		sessMgr.SetOnDeadHook(forwardMgr.CloseBySession)
+	}
+	s := &Server{
+		sessMgr:    sessMgr,
+		msgMgr:     msgMgr,
+		sshConfigs: sshConfigs,
+		forwardMgr: forwardMgr,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	mcpServer := mcpserver.NewMCPServer("superbtmr", version,
+		mcpserver.WithInstructions(mcpServerInstructions),
+		// Resources are read-only docs (resources/list + resources/read) and the
+		// list is fixed at startup, so no subscribe/listChanged: mcp-go v0.50 has
+		// no subscribe handler, and claiming it would break clients that try.
+		mcpserver.WithResourceCapabilities(false, false),
+		mcpserver.WithPromptCapabilities(false),
+	)
+
+	s.notifyMgr = notify.NewManager(s)
+	if sessMgr != nil {
+		sessMgr.SetNotifyHooks(s.notifyMgr.OnOutput, s.notifyMgr.OnExit, s.notifyMgr.ClearShell)
+	}
+	mcpServer.AddTool(s.newTool("session_start",
+		mcpgo.WithDescription("Start a session (connection container) plus its primary shell. ssh_config REQUIRED: a profile name from ssh_config(action=list), \"internal\" for the superbtmr host loopback, or a superbtmr:// entry locator pasted by the user (e.g. \"superbtmr://mac\" — parsed directly, no lookup needed). Empty command/args = the profile's default_shell, else the target's own login shell (pty), else an error (pipe). WARNING: command/args = single run-and-exit program; for multi-step or stateful work omit them and drive an interactive shell instead. Returns session_id and shell_id."),
+		mcpgo.WithString("command", mcpgo.Description("Executable line; empty with no args = login shell / profile default_shell")),
+		mcpgo.WithArray("args", mcpgo.Description("Argv after command"), mcpgo.WithStringItems()),
+		mcpgo.WithString("mode", mcpgo.Description("Mode of the primary shell only (per-shell setting): \"pty\" (default, interactive TUI) or \"pipe\" (no TTY, line-oriented). Other shells pick their own mode in shell_open."), mcpgo.DefaultString("pty")),
+		mcpgo.WithString("name"),
+		mcpgo.WithNumber("rows", mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.DefaultNumber(80)),
+		mcpgo.WithString("ssh_config", mcpgo.Required(), mcpgo.Description("REQUIRED: \"internal\" for the superbtmr host loopback, a profile name from ssh_config(action=list), or a superbtmr:// entry locator (e.g. \"superbtmr://mac\")")),
+	), withLogging("session_start", s.handleStartSession))
+
+	mcpServer.AddTool(s.newTool("shell_open",
+		mcpgo.WithDescription("Open another shell channel on an existing session connection (reuses SSH transport). Returns shell_id for I/O and session_id of the parent."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("name"),
+		mcpgo.WithString("command", mcpgo.Description("Executable; empty = resolve down the chain: profile default_shell, then (pty only) the target's own login shell. pipe with an empty command and no default_shell is refused — there is no login shell to request on a pipe channel.")),
+		mcpgo.WithString("mode", mcpgo.Description("Mode for this shell channel: \"pty\" (default, interactive TUI) or \"pipe\" (no TTY, line-oriented run-to-exit command). Per shell — the session is only the connection."), mcpgo.DefaultString("pty")),
+		mcpgo.WithNumber("rows", mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.DefaultNumber(80)),
+	), withLogging("shell_open", s.handleStartSubShell))
+
+	mcpServer.AddTool(s.newTool("shell_list",
+		mcpgo.WithDescription("List shell channels on a session: session_id + shells (id, name, status, timestamps). Use ids with shell_input/shell_key/shell_output/shell_close."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+	), withLogging("shell_list", s.handleListSubshells))
+
+	mcpServer.AddTool(s.newTool("shell_close",
+		mcpgo.WithDescription("Close one shell channel by shell_id without tearing down the session. For internal primary shell, close is a no-op (process outlives the tab). Use session_terminate to stop the whole session."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+	), withLogging("shell_close", s.handleCloseShell))
+
+	mcpServer.AddTool(s.newTool("shell_input",
+		mcpgo.WithDescription("Write text bytes to a shell's stdin. Follow with shell_key(key=\"enter\") to execute the typed line, then shell_output for the result. shell_id accepts a raw id, a session id, or a superbtmr:// locator (\"superbtmr://#<sid>\" = primary shell, \"superbtmr://#<sid>:2\" = 2nd shell channel)."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+		mcpgo.WithString("text", mcpgo.Required(), mcpgo.Description("UTF-8 text to write (no automatic newline)")),
+	), withLogging("shell_input", s.handleSendInput))
+
+	mcpServer.AddTool(s.newTool("shell_key",
+		mcpgo.WithDescription("Send a named key to a shell. Supported: enter, tab, esc, up/down/left/right, backspace, delete, home, end, ctrl+c/d/z/l/u/w. Use enter after shell_input to run a command. shell_id accepts a raw id, a session id, or a superbtmr:// locator (\"superbtmr://#<sid>\" or \"superbtmr://#<sid>:N\")."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+		mcpgo.WithString("key", mcpgo.Required(), mcpgo.Description("Named key (e.g. enter, ctrl+c, up)")),
+		mcpgo.WithNumber("repeat", mcpgo.Description("Times to send the key (1–20)"), mcpgo.DefaultNumber(1)),
+	), withLogging("shell_key", s.handlePressKey))
+
+	mcpServer.AddTool(s.newTool("shell_output",
+		mcpgo.WithDescription("Unified output reader for live AND closed (DEAD) shells with one byte-stream cursor model. shell_id may be a shell_id, a session_id, or a superbtmr:// locator (\"superbtmr://#<sid>\" = primary shell, \"superbtmr://#<sid>:N\" = Nth shell channel). Default: live = new output since the last read on reader_id (blocking up to timeout); closed = recent tail. tail_lines=N returns the last N lines; offset>=0 reads raw bytes from that position (stateless paging with has_more). Returns {output, has_more, lines_returned, bytes_returned, start_offset, end_offset, total_bytes, source, session_id, shell_id, session_status, session_uptime_seconds?}."),
+		mcpgo.WithString("shell_id", mcpgo.Required(), mcpgo.Description("shell_id, session_id, or superbtmr:// locator (superbtmr://#<sid> / superbtmr://#<sid>:N)")),
+		mcpgo.WithBoolean("strip_ansi", mcpgo.Description("If true, strip ANSI SGR/cursor escapes and compress terminal noise"), mcpgo.DefaultBool(true)),
+		mcpgo.WithNumber("timeout", mcpgo.Description("Blocking wait for new output on LIVE shells, in seconds (0–60); 0 = non-blocking; ignored for closed-session reads"), mcpgo.DefaultNumber(3)),
+		mcpgo.WithNumber("max_lines", mcpgo.Description("Return at most N newline-terminated lines (from the read window); 0 = no line limit"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("max_bytes", mcpgo.Description("Max raw bytes per call (from offset or tail); 0 = no limit. Use with start_offset/end_offset/has_more to paginate"), mcpgo.DefaultNumber(8192)),
+		mcpgo.WithNumber("offset", mcpgo.Description("Raw byte position to start reading; -1 = reader cursor (live, default) / tail (closed)"), mcpgo.DefaultNumber(-1)),
+		mcpgo.WithNumber("tail_lines", mcpgo.Description("Return only the last N lines of the stream (overrides offset); 0 = off"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("reader_id", mcpgo.DefaultNumber(0)),
+	), withLogging("shell_output", s.handleReadOutput))
+
+	mcpServer.AddTool(s.newTool("session_list",
+		mcpgo.WithDescription("Return metadata for every running parent session (exited ones are auto-removed). Child shells excluded — use shell_list."),
+	), withLogging("session_list", s.handleListSessions))
+	mcpServer.AddTool(s.newTool("session_info",
+		mcpgo.WithDescription("Return a JSON document with detailed fields for one session: identifiers, command line, PTY size, remote connection metadata, exit state, etc. session_id accepts a raw id or a superbtmr:// locator (\"superbtmr://#<sid>\"). Mode is a per-shell property and is not on the session record; read it from shell_list."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id or superbtmr:// locator (superbtmr://#<sid>)")),
+	), withLogging("session_info", s.handleGetSessionInfo))
+
+	mcpServer.AddTool(s.newTool("session_terminate",
+		mcpgo.WithDescription("Close a session: terminates all shells, closes the SSH transport, cascades forwards, but keeps the entry in the registry (status: exited / DEAD) and in the Web UI as a read-only tile, so output remains readable via shell_output. session_id accepts a raw id or a superbtmr:// locator (\"superbtmr://#<sid>\"). force=true = immediate kill; force=false waits grace_period after SIGTERM. To permanently erase the session and its on-disk byte logs, use session_delete. To close one shell only, use shell_close."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id or superbtmr:// locator (superbtmr://#<sid>)")),
+		mcpgo.WithBoolean("force", mcpgo.Description("If true, end immediately without honoring grace_period"), mcpgo.DefaultBool(false)),
+		mcpgo.WithNumber("grace_period", mcpgo.Description("Seconds to allow after SIGTERM before hard close when force is false (0–60)"), mcpgo.DefaultNumber(5)),
+	), withLogging("session_terminate", s.handleTerminateSession))
+
+	mcpServer.AddTool(s.newTool("session_delete",
+		mcpgo.WithDescription("Permanently delete a session: finalizes its process (running or DEAD), releases every child resource (shells, forwards, notification rules, buffers), drops the registry entry (its tile disappears from the Web UI) and removes its on-disk directory (manifests + log.bin + log.jsonl). Irreversible. To merely stop a session and keep reading its output, use session_terminate."),
+		mcpgo.WithString("session_id", mcpgo.Required(), mcpgo.Description("session_id or superbtmr:// locator (superbtmr://#<sid>)")),
+	), withLogging("session_delete", s.handleDeleteSession))
+
+	mcpServer.AddTool(s.newTool("shell_resize",
+		mcpgo.WithDescription("Update PTY rows/cols for a shell channel (propagates to SSH remote PTY when applicable). Requires a pty shell; a pipe shell has no TTY and returns an error."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+		mcpgo.WithNumber("rows", mcpgo.DefaultNumber(24)),
+		mcpgo.WithNumber("cols", mcpgo.DefaultNumber(80)),
+	), withLogging("shell_resize", s.handleResizePty))
+
+	mcpServer.AddTool(s.newTool("shell_detect",
+		mcpgo.WithDescription("Probe the superbtmr host (not a remote ssh_config) for an interactive shell: returns path, family (unix/powershell/cmd), and a hint."),
+	), withLogging("shell_detect", s.handleDetectShell))
+
+	mcpServer.AddTool(s.newTool("ssh_config",
+		mcpgo.WithDescription("SSH connection profiles: action=list returns usable profile names for session_start (never secrets or hostnames)."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("list")),
+	), withLogging("ssh_config", s.handleSSHConfigOps))
+
+	mcpServer.AddTool(s.newTool("message",
+		mcpgo.WithDescription("A session's transcript index: action=list returns the spans of the shell's byte log (status, time, start, end) in order. The bytes themselves are read with shell_output(offset=start, max_bytes=end-start)."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("list")),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+	), withLogging("message", s.handleMessageOps))
+
+	mcpServer.AddTool(s.newTool("shell_reader_register",
+		mcpgo.WithDescription("Allocate a new output reader_id for a shell, observing only bytes written after registration (no backlog). Pair every shell_output(..., reader_id) with the returned id."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+	), withLogging("shell_reader_register", s.handleRegisterReader))
+
+	mcpServer.AddTool(s.newTool("shell_reader_unregister",
+		mcpgo.WithDescription("Release a reader_id previously returned by shell_reader_register."),
+		mcpgo.WithString("shell_id", mcpgo.Required()),
+		mcpgo.WithNumber("reader_id", mcpgo.Required(), mcpgo.Description("Non-zero reader id from shell_reader_register")),
+	), withLogging("shell_reader_unregister", s.handleUnregisterReader))
+
+	mcpServer.AddTool(s.newTool("shell_notify",
+		mcpgo.WithDescription("Manage event notifications (reverse wake-up signal) for a shell channel: action=register sets a rule on channel resource or sampling; action=unregister removes by rule_id; action=list returns active rules."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("register", "unregister", "list")),
+		mcpgo.WithString("shell_id", mcpgo.Description("Target shell_id (required for register; optional filter for list)")),
+		mcpgo.WithString("channel", mcpgo.Description("Delivery channel (required for register): resource (MCP notifications/resources/updated) or sampling (MCP sampling/createMessage)"), mcpgo.Enum("resource", "sampling")),
+		mcpgo.WithString("event", mcpgo.Description("Trigger event (register only): output (default, dual-edge: immediate + 2s trailing delay), exit (one-shot on exit/abort), silence (one-shot after N sec without output)"), mcpgo.DefaultString("output"), mcpgo.Enum("exit", "silence", "output")),
+		mcpgo.WithNumber("silence_seconds", mcpgo.Description("Silence window in seconds for event=silence (default 3)"), mcpgo.DefaultNumber(3)),
+		mcpgo.WithString("rule_id", mcpgo.Description("Rule identifier (required for unregister)")),
+	), withLogging("shell_notify", s.handleShellNotifyOps))
+
+	mcpServer.AddTool(s.newTool("notify_user",
+		mcpgo.WithDescription("Post a visible notification to the human at the superbtmr Web UI (not the AI Agent): a colored toast on every open page plus a browser system notification; when session_id is set, that session's card is also highlighted.\n\nUse your own judgment: notify whenever the human would want to be interrupted or may not be watching this conversation — anything that needs their eyes, decision or action counts, not a fixed list of cases. Blockers read best as level=warn/error with duration_seconds=0 and the affected session_id, so the toast stands out and the right card highlights. Also say the same thing in your reply: delivered=0 means no Web UI tab was open and the toast was never shown."),
+		mcpgo.WithString("message", mcpgo.Required(), mcpgo.Description("Notification text shown to the user")),
+		mcpgo.WithString("title"),
+		mcpgo.WithString("level", mcpgo.Description("info (default), success, warn, or error"), mcpgo.DefaultString("info"), mcpgo.Enum("info", "success", "warn", "error")),
+		mcpgo.WithNumber("duration_seconds", mcpgo.Description("Seconds the toast stays before auto-dismissing (0–600); 0 = sticky until dismissed. Prefer 0 when the human must act before it can be ignored"), mcpgo.DefaultNumber(10)),
+		mcpgo.WithString("session_id", mcpgo.Description("Optional: highlight this session's card (and its terminal window, if open)")),
+	), withLogging("notify_user", s.handleNotifyUser))
+
+	// --- Port forwarding: one entry, action selects mode (OpenSSH names) ---
+	mcpServer.AddTool(s.newTool("forward",
+		mcpgo.WithDescription("SSH port forwarding: action(local) = ssh -L superbtmr hears on local_port→remote_host:remote_port; action(remote) = ssh -R (server listens on local_host:local_port → remote_host:remote_port reachable from superbtmr); action(dynamic) = ssh -D SOCKS5 (local_port, 0 = random); action(list) all forwards; action(close) by forward_id."),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("local", "remote", "dynamic", "list", "close")),
+		mcpgo.WithString("session_id", mcpgo.Description("For local/remote/dynamic; from session_start")),
+		mcpgo.WithString("remote_host", mcpgo.Description("local: target host relative to the SSH server"), mcpgo.DefaultString("localhost")),
+		mcpgo.WithNumber("remote_port", mcpgo.Description("local: target port on remote host")),
+		mcpgo.WithNumber("local_port", mcpgo.Description("local/dynamic: local listen port (0 = random)")),
+		mcpgo.WithString("local_host", mcpgo.Description("remote: bind address for the SSH server listener"), mcpgo.DefaultString("0.0.0.0")),
+		mcpgo.WithString("forward_id", mcpgo.Description("close: id from action(list)")),
+	), withLogging("forward", s.handleForwardOps))
+	// --- File operation tools (session-scoped SFTP) ---
+	mcpServer.AddTool(s.newTool("file_read",
+		mcpgo.WithDescription("Read a remote file via SSH/SFTP. mode text = printable with \\xHH escapes; hex = hex dump; file = download to the superbtmr host. text/hex reads return at most 8 MiB per call: page with offset + has_more/total_size from the result. mode=file streams the whole file (omit offset/length). Example: read first 1KB hex of /var/log/syslog — {session_id, remote_path, mode:\"hex\", offset:0, length:1024}."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("offset", mcpgo.Description("Start byte offset (0-based)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read (0 = rest of file; text/hex capped at 8 MiB per call)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithString("mode", mcpgo.Description("Output mode: text, hex, or file"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex", "file")),
+		mcpgo.WithString("local_path", mcpgo.Description("Download destination path on the superbtmr host. Only used with mode=file.")),
+	), withLogging("file_read", s.handleFileRead))
+
+	mcpServer.AddTool(s.newTool("file_write",
+		mcpgo.WithDescription("Write a remote file via SSH/SFTP. Small writes: inline data (text with \\xHH, or hex). Large/binary: local_path + local_offset + length streams from a file on the superbtmr host. offset>0 writes without truncating (use file_stat size to append)."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+		mcpgo.WithNumber("offset", mcpgo.Description("Write start offset: 0 rewrites the file from the beginning (truncates); >0 writes at that byte position without truncating (to append, set offset to the current file size from file_stat)"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithString("data", mcpgo.Description("Inline data to write (text or hex per mode)")),
+		mcpgo.WithString("mode", mcpgo.Description("Data encoding: text (default, supports \\xHH) or hex"), mcpgo.DefaultString("text"), mcpgo.Enum("text", "hex")),
+		mcpgo.WithString("local_path", mcpgo.Description("Source file path on the superbtmr host")),
+		mcpgo.WithNumber("local_offset", mcpgo.Description("Read start offset in local file"), mcpgo.DefaultNumber(0)),
+		mcpgo.WithNumber("length", mcpgo.Description("Bytes to read from local file (0=all)"), mcpgo.DefaultNumber(0)),
+	), withLogging("file_write", s.handleFileWrite))
+
+	mcpServer.AddTool(s.newTool("file_stat",
+		mcpgo.WithDescription("Get file or directory info from remote via SSH/SFTP. Returns name, size, is_dir, mod_time, and children list for directories."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path")),
+	), withLogging("file_stat", s.handleFileStat))
+
+	mcpServer.AddTool(s.newTool("file_delete",
+		mcpgo.WithDescription("Delete a remote file or empty directory via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file or directory path to delete")),
+	), withLogging("file_delete", s.handleFileDelete))
+
+	mcpServer.AddTool(s.newTool("file_rename",
+		mcpgo.WithDescription("Move or rename a remote file/directory via SSH/SFTP (same filesystem)."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("from_path", mcpgo.Required(), mcpgo.Description("Current remote path")),
+		mcpgo.WithString("to_path", mcpgo.Required(), mcpgo.Description("New remote path")),
+	), withLogging("file_rename", s.handleFileRename))
+
+	mcpServer.AddTool(s.newTool("file_mkdir",
+		mcpgo.WithDescription("Create a directory (and parents) on the remote via SSH/SFTP."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote directory path to create")),
+	), withLogging("file_mkdir", s.handleFileMakeDir))
+
+	mcpServer.AddTool(s.newTool("file_urls",
+		mcpgo.WithDescription("Get HTTP download/upload URLs for a remote file path under a session. Use these URLs for direct curl/wget/browser access."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("remote_path", mcpgo.Required(), mcpgo.Description("Remote file path")),
+	), withLogging("file_urls", s.handleGetFileURLs))
+
+	// --- Low-frequency file operations: one tool per parameter family, ---
+	// dispatched by the `action` enum. This keeps rare operations available
+	// (SFTP works uniformly on Windows/Unix) without bloating tools/list.
+	mcpServer.AddTool(s.newTool("file_perm",
+		mcpgo.WithDescription("Ownership/metadata ops on a remote path: chmod (mode, decimal perms), chown (uid+gid), chtimes (atime+mtime Unix milliseconds)."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("chmod", "chown", "chtimes")),
+		mcpgo.WithString("remote_path", mcpgo.Required()),
+		mcpgo.WithNumber("mode", mcpgo.Description("chmod: decimal Unix perms, e.g. 493 = 0755")),
+		mcpgo.WithNumber("uid", mcpgo.Description("chown: numeric user ID")),
+		mcpgo.WithNumber("gid", mcpgo.Description("chown: numeric group ID")),
+		mcpgo.WithNumber("atime", mcpgo.Description("chtimes: access time, Unix milliseconds")),
+		mcpgo.WithNumber("mtime", mcpgo.Description("chtimes: modification time, Unix milliseconds")),
+	), withLogging("file_perm", s.handleFilePerm))
+
+	mcpServer.AddTool(s.newTool("file_link",
+		mcpgo.WithDescription("Link ops: readlink (remote_path → {target}), symlink (target + link_path), link/hardlink (existing_path + new_path)."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("readlink", "symlink", "link")),
+		mcpgo.WithString("remote_path", mcpgo.Description("readlink: symlink path")),
+		mcpgo.WithString("target", mcpgo.Description("symlink: existing path to point to")),
+		mcpgo.WithString("link_path", mcpgo.Description("symlink: new symlink path")),
+		mcpgo.WithString("existing_path", mcpgo.Description("link: existing file")),
+		mcpgo.WithString("new_path", mcpgo.Description("link: new hard link path")),
+	), withLogging("file_link", s.handleFileLinkOp))
+
+	mcpServer.AddTool(s.newTool("file_fs",
+		mcpgo.WithDescription("Path/filesystem ops on a remote path: truncate (size bytes), realpath ({canonical_path}), statvfs (space/inodes)."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+		mcpgo.WithString("action", mcpgo.Required(), mcpgo.Enum("truncate", "realpath", "statvfs")),
+		mcpgo.WithString("remote_path", mcpgo.Required()),
+		mcpgo.WithNumber("size", mcpgo.Description("truncate: new size in bytes")),
+	), withLogging("file_fs", s.handleFileFsOp))
+
+	mcpServer.AddTool(s.newTool("file_getwd",
+		mcpgo.WithDescription("Get the SFTP working directory for this session connection. This is not the interactive shell's cwd (pwd); use a shell command for that."),
+		mcpgo.WithString("session_id", mcpgo.Required()),
+	), withLogging("file_getwd", s.handleFileGetwd))
+
+	s.mcpServer = mcpServer
+	s.sseServer = mcpserver.NewSSEServer(mcpServer, s.sseOpts...)
+	// Streamable HTTP (MCP spec): mount at /stream for clients such as Open WebUI.
+	// Do not use WithStreamableHTTPServer(mainSrv) here — Shutdown must not close the shared listener.
+	s.streamServer = mcpserver.NewStreamableHTTPServer(mcpServer)
+	return s
+}
+
+// RegisterSSHConfigWriteTools upgrades the ssh_config tool schema in place with
+// the write-capable actions (create/edit/copy/delete). Call only when
+// -mcp-manage-ssh-configs is set. The dispatcher (handleSSHConfigOps) already
+// routes these actions; without the upgrade only action=list is advertised and
+// the others are rejected at the schema layer.
+func (s *Server) RegisterSSHConfigWriteTools() {
+	s.sshConfigWrites = true
+	fields := func() []mcpgo.ToolOption {
+		var o []mcpgo.ToolOption
+		o = append(o, mcpgo.WithString("host"), mcpgo.WithString("user"))
+		o = append(o,
+			mcpgo.WithString("password", mcpgo.Description("create: password auth (or private_key); edit: replace, omit to keep")),
+			mcpgo.WithString("private_key", mcpgo.Description("create/edit: PEM private key content")),
+			mcpgo.WithString("key_passphrase", mcpgo.Description("create/edit: passphrase for encrypted private_key")),
+			mcpgo.WithBoolean("trust_unknown_host", mcpgo.DefaultBool(false)),
+			mcpgo.WithString("known_hosts"),
+			mcpgo.WithNumber("dial_timeout_seconds", mcpgo.DefaultNumber(30)),
+			mcpgo.WithString("proxy", mcpgo.Description("SOCKS5 proxy URL, e.g. socks5://user:pass@host:port")),
+			mcpgo.WithString("description"),
+			mcpgo.WithString("default_shell"),
+			mcpgo.WithString("default_mode", mcpgo.Description("Default mode: pty or pipe")),
+			mcpgo.WithBoolean("default_approval", mcpgo.Description("create/edit: start sessions from this profile with review mode on (required approvals per AI write). On edit, sending false turns it off; omitting it keeps the current value")),
+			mcpgo.WithString("jump_host"),
+			mcpgo.WithString("jump_user"),
+			mcpgo.WithNumber("jump_port", mcpgo.DefaultNumber(22)),
+			mcpgo.WithString("jump_password"),
+			mcpgo.WithString("jump_private_key"),
+			mcpgo.WithString("jump_key_passphrase"),
+			mcpgo.WithBoolean("jump_trust_unknown_host", mcpgo.DefaultBool(false)),
+			mcpgo.WithString("jump_known_hosts"),
+			mcpgo.WithNumber("jump_dial_timeout_seconds", mcpgo.DefaultNumber(30)),
+			mcpgo.WithString("jump_proxy"),
+		)
+		return o
+	}
+
+	writeActions := []string{"list", "create", "edit", "copy", "delete"}
+	extra := []mcpgo.ToolOption{
+		// Widen the action enum in place.
+		func(t *mcpgo.Tool) {
+			if prop, ok := t.InputSchema.Properties["action"].(map[string]any); ok {
+				prop["enum"] = writeActions
+			}
+		},
+		mcpgo.WithString("name", mcpgo.Description("create/edit/delete: profile name ([A-Za-z0-9_-], max 64)")),
+		mcpgo.WithString("source_name", mcpgo.Description("copy: existing profile to copy from")),
+		mcpgo.WithString("target_name", mcpgo.Description("copy: new profile name (must not exist)")),
+	}
+	extra = append(extra, fields()...)
+
+	// Apply the extra properties onto the existing registered tool schema.
+	tools := s.mcpServer.ListTools()
+	st, ok := tools["ssh_config"]
+	if !ok {
+		panic("ssh_config tool must be registered before RegisterSSHConfigWriteTools")
+	}
+	t := st.Tool
+	for _, opt := range extra {
+		opt(&t)
+	}
+	t.Description = "SSH connection profiles: action=list (names only, never secrets), create, edit (patch; omitted fields keep stored values incl. secrets), copy (server-side, secrets never reach the agent), delete. create requires host+user and password or private_key."
+	s.mcpServer.DeleteTools("ssh_config")
+	s.mcpServer.AddTool(t, withLogging("ssh_config", s.handleSSHConfigOps))
+}
+
+// SSEHandler exposes the MCP SSE endpoint for mounting on a shared mux.
+func (s *Server) SSEHandler() http.Handler {
+	return s.sseServer.SSEHandler()
+}
+
+// MessageHandler exposes the MCP JSON-RPC message endpoint for mounting on a shared mux.
+func (s *Server) MessageHandler() http.Handler {
+	return s.sseServer.MessageHandler()
+}
+
+// StreamableHTTPHandler exposes the MCP streamable-HTTP endpoint (POST/GET/DELETE on one path).
+// Mount at "/stream" (or another path with a matching wrapper); clients use e.g. http://host:port/stream.
+func (s *Server) StreamableHTTPHandler() http.Handler {
+	return s.streamServer
+}
+
+// Start begins serving MCP over SSE on the given address.
+func (s *Server) Start(addr string) error {
+	host, port, _ := net.SplitHostPort(addr)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "8080"
+	}
+	s.baseURL = "http://" + net.JoinHostPort(host, port)
+	// Docs resources/prompts need baseURL, so they are registered here (once)
+	// rather than in New(). registerDocs is idempotent for a single Start.
+	s.registerDocs()
+	return s.sseServer.Start(addr)
+}
+
+// Stop gracefully shuts down the SSE server.
+func (s *Server) Stop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if s.streamServer != nil {
+		_ = s.streamServer.Shutdown(ctx)
+	}
+	return s.sseServer.Shutdown(ctx)
+}

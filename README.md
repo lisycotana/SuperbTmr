@@ -1,0 +1,543 @@
+<div id="top">
+
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2786FF,50:6E4AFF,100:FF69B4&height=150&section=header" width="100%" alt="header banner">
+</p>
+
+<p align="center">
+  <a href="https://github.com/lisycotana/SuperbTmr">
+    <img src="./docs/assets/logo.png" width="150" alt="SuperbTmr logo">
+  </a>
+</p>
+
+<h1 align="center">⚡ SuperbTmr</h1>
+
+<p align="center">
+  <a href="https://github.com/lisycotana/SuperbTmr">
+    <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=An+AI-native+terminal+platform;Cross-platform+%C2%B7+Visual+%C2%B7+Built+for+Human%E2%80%93Agent+Collaboration;One+port%2C+four+entrances;Drive+real+terminals+over+MCP+and+SKILLS" alt="SuperbTmr tagline">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lisycotana/SuperbTmr/stargazers">
+    <img src="https://img.shields.io/github/stars/lisycotana/superbtmr?label=Stars&logo=github&style=for-the-badge&color=2786ff" alt="Stars">
+  </a>
+  <a href="https://github.com/lisycotana/SuperbTmr/forks">
+    <img src="https://img.shields.io/github/forks/lisycotana/superbtmr?label=Forks&logo=github&style=for-the-badge&color=2786ff" alt="Forks">
+  </a>
+  <a href="https://github.com/lisycotana/SuperbTmr/releases">
+    <img src="https://img.shields.io/github/v/release/lisycotana/superbtmr?label=Release&logo=github&style=for-the-badge&color=2786ff" alt="Release">
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-2786ff?style=for-the-badge" alt="Platform">
+  <img src="https://img.shields.io/badge/Go-Pure%20Go%20%7C%20No%20CGO-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Pure Go, No CGO">
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License">
+  </a>
+</p>
+
+<p align="center">
+  <strong>English</strong> | <a href="./README.zh.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="#features"><img src="https://img.shields.io/badge/Features-2786ff?style=flat-square" alt="Features"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-2786ff?style=flat-square" alt="Quick Start"></a>
+  <a href="#usage"><img src="https://img.shields.io/badge/Usage-2786ff?style=flat-square" alt="Usage"></a>
+  <a href="#docker-deployment"><img src="https://img.shields.io/badge/Docker-2786ff?style=flat-square" alt="Docker"></a>
+  <a href="#connecting-ai-clients-mcp"><img src="https://img.shields.io/badge/MCP-6E4AFF?style=flat-square" alt="MCP"></a>
+  <a href="#agent-skill-curl-only-no-mcp"><img src="https://img.shields.io/badge/Skill-6E4AFF?style=flat-square" alt="Skill"></a>
+  <a href="#connecting-scripts--programs-rest-api"><img src="https://img.shields.io/badge/REST%20API-6E4AFF?style=flat-square" alt="REST API"></a>
+  <a href="#tool-reference"><img src="https://img.shields.io/badge/Tools-00ADD8?style=flat-square" alt="Tools"></a>
+  <a href="#known-limitations--security-model"><img src="https://img.shields.io/badge/Security-FF69B4?style=flat-square" alt="Security"></a>
+</p>
+
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=rect&color=0:2786FF,100:FF69B4&height=3&section=header" width="100%" alt="divider">
+</p>
+
+## Introduction
+
+SuperbTmr is a shared terminal workspace for remote labs and multi-machine courses. One instance puts every student, every teaching assistant, and every AI agent on the same real terminals — local or over SSH — behind a single browser page, with live observation, instant takeover, and a durable record of what actually happened.
+
+It is built around one observation: real technical work is almost never a single command. Compiling, debugging, configuring and installing are **multi-turn** interactions that need a terminal which stays alive. Yet AI agents can only fire one-shot commands, and teaching labs scatter their terminals across VNC, screen-sharing and hand-written scripts. SuperbTmr closes both gaps with one session layer:
+
+- **You (human)** — a browser-based Web UI for live observation and instant takeover of any session;
+- **AI Agents** — drive the same real terminals through **MCP** or **SKILLS**;
+- **Scripts / programs** — a full REST API plus WebSocket channel for programmatic session, forward, and file operations.
+
+On the platform layer, long-lived sessions with read-only replay, parallel multi-host / multi-session orchestration, and a full SSH connection lifecycle keep the whole loop **observable, programmable, and easy to hand off between human and AI**. Cross-platform and cloud-native, written in pure Go with no CGO: it ships as a single lightweight binary that runs persistently with low overhead, and goroutine concurrency keeps it high-throughput and low-latency.
+
+### Demo Video
+
+https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
+
+## Why SuperbTmr
+
+### Multi-session visual management
+
+A powerful Web UI manages many hosts and many sessions in one place: start it locally with a single command or deploy the container to the cloud — the browser gets the same interface either way.
+
+![pic2](docs/assets/pic2.png)
+
+- **Multi-session dashboard**: every running session listed by name, switch or take over at any time.
+- **Real-time observation**: watch `htop`'s live display, `vim`'s editing process, or an installer's prompts in the browser, just like a local terminal.
+- **Tabs and tiling workspace**: one SSH session can open several shells, each its own tab; sessions can also be tiled side by side and tracked together.
+- **Port forwarding at a glance**: local/remote ports and protocols for every session, all in one panel.
+- **File management**: browse, upload, download, rename and create directories from the UI.
+- **Centralized connection templates**: a unified SSH config store; the Agent opens sessions by profile name and never reads the config itself.
+- **Read-only replay of closed sessions**: output stays browsable after a session closes, crashes, or survives a restart.
+
+### AI-native by design
+
+Seamless human–agent interaction and pair operation: the Agent is a standing user of the terminal, alongside you and your scripts.
+
+An Agent natively runs only one-shot commands, while real work is largely **multi-turn interaction** — SSH login needs a password first, a Python REPL is debugged line by line, an installer asks `[Y/n]`, tools like `top`/`htop`/impacket need a terminal. SuperbTmr hands the Agent a real terminal: one session stays alive and gets reused, so **TUIs**, **REPLs**, **GDB**, **msfconsole** and **vim** can be driven continuously the way a human would — through MCP or through the instance's own [Agent Skill](#agent-skill-curl-only-no-mcp) over plain `curl`.
+
+![pic1](docs/assets/pic1.png)
+
+
+- **One session layer, peer entrances.** MCP, SKILLS and REST/WebSocket sit at the same level as the Web UI, sharing the same real sessions. You can watch every Agent step in the browser and take over at any time; the Agent in turn can pause and hand a password/MFA prompt to you.
+- **Built for token and turn budgets.** Tool schemas are compact and can be deferred-loaded (see [`docs/mcp-tools.md`](./docs/mcp-tools.md)); `shell_output` pages by tail/offset cursors so only the slices you ask for ever enter the context window; `shell_notify` sends a bare wake-up signal.
+- **Self-describing instances.** Every running SuperbTmr serves its own `/api.md` and `/skills.md` (no token needed) and registers them as MCP resources plus a `learn-api` prompt, so a fresh Agent can drive this exact instance straight away, using only these two files.
+- **Secrets stay server-side.** Passwords, private keys and passphrases written through `ssh_config` are stored only on the host, and the MCP read interface returns profile names only; the SSH-config write tools stay off unless the operator opts in with `--mcp-manage-ssh-configs`.
+- **Failure-tolerant, resumable work.** A closed, crashed or restarted session stays in the session list as a read-only DEAD tile with its output readable, so an Agent (or you) can pick up from the interrupted state; reconnecting the same `superbtmr://<entry>` starts a fresh session.
+- **Humans always keep the option to step in.** `notify_user` reaches you directly, privileged prompts are meant to be typed by you in the Web UI, and writes to one shell are serialized, so a human and an Agent can type on the same terminal with their inputs applied in order.
+
+## Quick Navigation
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Docker Deployment](#docker-deployment)
+- [Connecting AI Clients (MCP)](#connecting-ai-clients-mcp)
+- [Agent Skill (curl-only, no MCP)](#agent-skill-curl-only-no-mcp)
+- [Connecting Scripts / Programs (REST API)](#connecting-scripts--programs-rest-api)
+- [Examples](#examples)
+- [Tool Reference](#tool-reference)
+- [Known Limitations & Security Model](#known-limitations--security-model)
+
+## Features
+
+- **⚡ One-command install, pure Go, no CGO** — `go install github.com/lisycotana/SuperbTmr@latest`; builds with `CGO_ENABLED=0` and binds no system shared libraries, so one static binary runs anywhere and cross-compiles natively (ConPTY on Windows, POSIX PTY on macOS / Linux — same behaviour everywhere).
+- **🔌 One port, four entrances** — Web UI (humans), MCP / SKILLS (Agents), and REST + WebSocket (scripts) share one port.
+- **🤝 Human–AI relay** — You and the Agent share one live session and you can take over or interrupt at any time; the Agent pauses at `sudo` / password / MFA prompts for you to type in the Web UI; input is serialized so keystrokes never collide.
+- **🟦 Multi-turn interaction on a real terminal** — The process keeps running, so an Agent drives TUIs, REPLs, GDB, msfconsole, or vim across conversation turns; a full PTY (ConPTY on Windows) behaves the same on every platform.
+- **🟫 Local or remote, one workflow** — Zero-config access to the SuperbTmr host (`ssh_config="internal"`) or any remote machine over SSH profiles; commands, file transfer (SFTP plus resumable HTTP URLs), and port forwarding (`-L` / `-R` / `-D`) all run over that single connection.
+- **🟧 Built-in visual management** — Browser live terminals, session dashboard, tabbed shells, tiling workspace, read-only replay of closed sessions, file and forward panels; `/api.html` holds the API / MCP / SKILLS cheat sheet.
+- **🟨 Multiple Agents, no lost output** — Parallel readers of one session keep independent cursors; a closed session (explicit close, exit, crash, or restart) stays in the registry as a read-only DEAD tile with its full output intact, so you can still replay, page through, or delete it whenever you like. After a drop, open a fresh session from the same entry (`superbtmr://<entry>`) and carry on.
+- **🟥 Proactive notifications, no polling** — `shell_notify` wakes the Agent on process exit, silence, or new output — signal only, no payload (pull the text when needed); `channel="sampling"` sends `sampling/createMessage` directly.
+- **🌐 Multi-language Web UI** — The interface follows the browser language on first load and can be overridden from the header; the choice is remembered, and switching never reloads the page or rebuilds open terminals.
+- **🔍 Optional review mode** — Under it, the Agent's command executions and file changes run only after human approval — for production hosts.
+- **🔒 Credential-safe by design** — Passwords, private keys, and passphrases written through `ssh_config` are never readable back, so plaintext never enters the Agent's context; config-writing tools stay off unless `--mcp-manage-ssh-configs` is set.
+
+## Quick Start
+
+### Quick Install (Go toolchain required)
+
+The fastest way to install — one command, no clone, no build:
+
+```bash
+go install github.com/lisycotana/SuperbTmr@latest
+```
+
+`go install` resolves the module through the Go proxy (use `GOPROXY=https://goproxy.cn,direct` in mainland China) and drops the `superbtmr` binary into `$(go env GOPATH)/bin` — make sure that directory is on your `PATH`. SuperbTmr is written in Go, so install is `go install` or a prebuilt Release binary: there is no `npx`/`uvx` variant, and it needs no Node or Python runtime. Being a Go module, it also supports source-level integration: `go get github.com/lisycotana/SuperbTmr` to bring it in as a dependency, or fork and build a customized binary from source. Then run:
+
+```bash
+superbtmr
+```
+
+### Download
+
+Head to the [Releases page](https://github.com/lisycotana/SuperbTmr/releases) and download the pre-built binary for your platform:
+
+| Platform            | File                       |
+| :------------------ | :------------------------- |
+| Linux (x86_64)      | [superbtmr-linux-amd64](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-linux-amd64) |
+| Linux (ARM64)       | [superbtmr-linux-arm64](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-linux-arm64) |
+| macOS (Intel)       | [superbtmr-darwin-amd64](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-darwin-amd64) |
+| macOS (Apple Silicon) | [superbtmr-darwin-arm64](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-darwin-arm64) |
+| Windows (x86_64)    | [superbtmr-windows-amd64.exe](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-windows-amd64.exe) |
+| Windows (ARM64)     | [superbtmr-windows-arm64.exe](https://github.com/lisycotana/SuperbTmr/releases/latest/download/superbtmr-windows-arm64.exe) |
+
+### Build
+
+```bash
+# Clone
+git clone https://github.com/lisycotana/SuperbTmr.git
+cd superbtmr
+
+# Build (pure Go — no CGO needed, cross-compiles to any platform)
+CGO_ENABLED=0 go build -o superbtmr .
+
+# Run (defaults: loopback, port 18765; data goes to ~/.superbtmr)
+./superbtmr
+```
+
+Open `http://127.0.0.1:18765` in your browser to enter the **Web UI**.
+
+## Usage
+
+### Command Line
+
+```text
+superbtmr [flags]
+```
+
+| Flag            | Default       | Description                                                              |
+| --------------- | ------------- | ------------------------------------------------------------------------ |
+| `--host`        | `127.0.0.1`   | HTTP bind address. `0.0.0.0` listens on all interfaces. A non-loopback bind **requires** an auth token/hash (startup fails otherwise). |
+| `--port`        | `18765`       | HTTP port. Shared by the Web UI, MCP SSE, MCP streamable HTTP, and the docs/skill endpoints (`/api.md`, `/skills.md`). |
+| `--data-dir`    | `~/.superbtmr`   | Persistence directory (sessions, SSH configs). Auto-created. Default overridable via `$SUPERBTMR_DATA_DIR`. |
+| `--log-level`   | `info`        | Log level: `debug` / `info` / `warn` / `error`. `debug` shows all MCP tool calls; failed tool calls and session-create errors log at `warn`/`error` regardless. |
+| `--no-internal` | `false`       | Disable the built-in loopback SSH profile.                                   |
+| `--mcp-manage-ssh-configs` | `false` | Enable MCP tools to create/edit/delete SSH configs (secrets are never exposed). |
+| `--auth-token`   | *(unset)*    | Static token for HTTP authentication (or `$SUPERBTMR_AUTH_TOKEN`). Every client — API, MCP, browser — must present it. Mutually exclusive with `--auth-hash`. |
+| `--auth-hash`    | *(unset)*    | Salted SHA-256 hash of the token (`sha256-<salt_hex>-<digest_hex>`) so the server never holds the plaintext (or `$SUPERBTMR_AUTH_HASH`). Generate with `superbtmr --gen-auth-hash`. Mutually exclusive with `--auth-token`. |
+| `--disable-auth` | `false`      | Turn HTTP authentication off **on purpose**, including on a non-loopback bind (or `$SUPERBTMR_DISABLE_AUTH_TOKEN=1`). Pair it with a loopback port so only local callers can reach the port. Combining it with `--auth-token`/`--auth-hash` is an error rather than a silently-won argument. |
+| `--mcp-defer-tools` | `false`   | Tag low-frequency MCP tools (`file_*`, `forward`, `shell_resize`, …) with `defer_loading` so clients fetch their schemas on demand, shrinking the initial `tools/list`. Off by default: clients that ignore the marker — or talk to SuperbTmr through a gateway that drops it — would otherwise never see those tools. See [Deferred tool loading](#deferred-tool-loading). |
+| `--gen-auth-hash` | *(action)* | Generate the salted SHA-256 hash of a token for `--auth-hash`, then exit (token from an argument, or from stdin without echo on a terminal). |
+| `--version`      | *(action)*   | Print version, commit, and build date, then exit. The version follows the git tag automatically (release builds inject it via `-ldflags`; plain `go build` / `go install module@vX.Y.Z` falls back to the module version embedded by the Go toolchain). |
+
+These flags are your **capability gates**: `--no-internal` narrows Agents to remote hosts only, and `--mcp-manage-ssh-configs` is what opens SSH-config write access. Tighten or loosen what Agents can touch per scenario. See [Authentication](#authentication) below.
+
+### Examples
+
+```bash
+# Listen on all interfaces
+./superbtmr --host 0.0.0.0 --auth-token "your-long-random-token"
+
+# Listen on all interfaces with only a salted hash stored server-side
+./superbtmr --host 0.0.0.0 --auth-hash "$(./superbtmr --gen-auth-hash)"
+
+# Allow AI agents to manage SSH configs
+./superbtmr --mcp-manage-ssh-configs
+
+# Disable the built-in loopback profile (agents may only reach remote hosts)
+./superbtmr --no-internal
+```
+
+### Authentication
+
+A single static token protects the whole HTTP surface — the Web UI, REST API, MCP SSE, MCP streamable HTTP, and the browser WebSocket. (The read-only docs `/api.md` and `/skills.md` stay public, so an agent can fetch them before it has a token.) Configuring it is optional for loopback-only binds (`127.0.0.1` keeps its no-setup default); exposing a non-loopback bind without a token is a startup error.
+
+```bash
+# Plaintext: flag or env var
+./superbtmr --auth-token "your-long-random-token"
+SUPERBTMR_AUTH_TOKEN="your-long-random-token" ./superbtmr
+
+# Hashed (recommended): the server keeps only sha256-<salt>-<digest>.
+# `superbtmr --gen-auth-hash` reads the token from stdin without echo on a terminal,
+# so it never lands in shell history:
+./superbtmr --gen-auth-hash
+SUPERBTMR_AUTH_HASH='sha256-...' ./superbtmr
+```
+
+How each client presents the token:
+
+| Client | Credential |
+|--------|------------|
+| API / MCP / curl | `Authorization: Bearer <token>` header |
+| Browser (Web UI) | Native login prompt on `401` — the username is ignored (leave it empty), the **token is the password**. A `superbtmr_token` cookie is then set automatically so same-origin WebSocket handshakes authenticate too. |
+
+Behavior notes:
+
+- `--auth-token` and `--auth-hash` are mutually exclusive; a flag value overrides the environment variable of the same setting.
+- A colon inside the token is fine: the server also accepts the whole decoded `user:pass` string when it equals the token, so clients that split at the first colon (e.g. `curl -u user:pass`) still authenticate. `curl -u :<token>` remains the canonical form.
+- Without a token or hash, startup fails on any non-loopback host (`0.0.0.0`, a LAN IP, or a hostname other than `localhost`), so an accidentally exposed instance can never run unauthenticated.
+- `--disable-auth` (or `SUPERBTMR_DISABLE_AUTH_TOKEN=1`) explicitly lifts that requirement. It is the escape hatch for loopback-only setups — demo videos, screen recordings, single-user workstations — where the token protects nothing. Because it is a deliberate override, combining it with `--auth-token`/`--auth-hash` is a startup error rather than a silently-won argument, and the startup log switches from the informational auth line to a warning.
+- Browsers use HTTP Basic, which is Base64, not encryption. When serving SuperbTmr beyond your own machine, terminate TLS in a reverse proxy in front of it — the `superbtmr_token` cookie then gets the `Secure` flag automatically only when the request arrived over TLS.
+
+### Connecting to Remote Hosts
+
+Zero setup: `ssh_config="internal"` drives the SuperbTmr host itself. To reach a remote machine, create an SSH profile — in the Web UI's new-connection dialog (it ships a TOML template and a **Test connection** button), or via the REST API `PUT /api/connections/<name>` with a TOML body:
+
+```toml
+kind = "remote"
+host = "192.168.1.100"
+user = "pi"
+trust_unknown_host = true  # first connect to an unknown host
+
+# EITHER a password:
+password = "..."
+
+# OR the private key's PEM content itself — a path like "~/.ssh/id_ed25519" will NOT work:
+private_key = """-----BEGIN OPENSSH PRIVATE KEY-----
+<paste the full content of ~/.ssh/id_ed25519>
+-----END OPENSSH PRIVATE KEY-----"""
+key_passphrase = "..."     # only if the key is passphrase-protected
+
+# Optional bastion (ProxyJump) hop:
+[jump]
+host = "bastion.example.com"
+user = "ops"
+password = "..."
+```
+
+Profiles live in `data-dir/ssh_configs/<name>/config.toml`; list them with `ssh_config(action=list)`. Credentials written this way are never readable back. Agents can create profiles too, but only when SuperbTmr was started with `--mcp-manage-ssh-configs`.
+
+## Docker Deployment
+
+### Run the official image
+
+The registry image runs as non-root `superbtmr` (uid/gid 1000) with `/home/superbtmr` declared a `VOLUME` — all state (sessions, SSH configs, transcripts) defaults to `~/.superbtmr`. It carries only the binary: no baked-in entrypoint or exposed port, so the run command decides the bind address.
+
+```bash
+docker run -d --name superbtmr -p 18765:18765 -v superbtmr-data:/home/superbtmr -e SUPERBTMR_AUTH_TOKEN=change-me-to-a-long-random-secret ghcr.io/lisycotana/superbtmr:latest superbtmr --no-internal --host 0.0.0.0 --port 18765
+```
+
+> Shell examples are single-line on purpose: a `\` continuation is valid bash but a syntax error in PowerShell, so every command pastes as-is into bash, zsh, and PowerShell.
+
+`--host 0.0.0.0` is reachable from outside the container, so an auth token is required. MCP endpoint: `http://localhost:18765/stream`. With a bind mount instead of a named volume, chown the host directory first: `chown -R 1000:1000 /path/on/host`.
+
+#### Docker without a token (loopback only)
+
+For a throwaway demo, a screen recording, or a single-user workstation, the token is friction with no benefit. Publish the port on the **host loopback only** and tell SuperbTmr explicitly that the missing credentials are intentional:
+
+```bash
+docker run -d --name superbtmr -p 127.0.0.1:18765:18765 -v superbtmr-data:/home/superbtmr ghcr.io/lisycotana/superbtmr:latest superbtmr --no-internal --host 0.0.0.0 --port 18765 --disable-auth
+```
+
+Two details make this safe rather than merely convenient. `-p 127.0.0.1:18765:18765` binds the published port to the host's loopback, so the container stays reachable to this machine and invisible to the LAN — the container itself still listens on `0.0.0.0` because that is the only address routable from outside its network namespace. And `--disable-auth` is required precisely because SuperbTmr refuses to start unauthenticated on a non-loopback bind: the flag is the operator taking responsibility, which is why it also downgrades the startup log to a warning. The equivalent environment form is `-e SUPERBTMR_DISABLE_AUTH_TOKEN=1` instead of the flag.
+
+### Multi-stage build: add SuperbTmr to any container
+
+Drop this `Dockerfile` into your application project: the build stage installs SuperbTmr with `go install`, then `COPY --from` copies the binary into the target image — no Go runtime needed there.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+ARG GO_IMAGE=golang:1.25-alpine
+FROM ${GO_IMAGE} AS superbtmr-build
+
+# Module proxy; use https://proxy.golang.org,direct outside China
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY} GOBIN=/out CGO_ENABLED=0
+
+# Pin to a concrete version in production, e.g. @vX.Y.Z
+RUN go install github.com/lisycotana/SuperbTmr@latest
+
+# Any target base image
+FROM alpine
+COPY --from=superbtmr-build /out/superbtmr /usr/local/bin/superbtmr
+```
+
+Swap `GOPROXY` or `GO_IMAGE` with `--build-arg` if you need another module proxy or base-image mirror.
+
+### Startup command examples
+
+Containers must bind `0.0.0.0`, and a non-loopback bind **requires authentication** (`SUPERBTMR_AUTH_TOKEN` / `SUPERBTMR_AUTH_HASH`) or startup fails.
+
+```bash
+docker build --build-arg GOPROXY=https://goproxy.cn,direct -t my-app-with-superbtmr .
+docker run -d --name my-app-superbtmr -p 18765:18765 -v superbtmr-data:/data -e SUPERBTMR_AUTH_TOKEN=change-me-to-a-long-random-secret --entrypoint /usr/local/bin/superbtmr my-app-with-superbtmr --host 0.0.0.0 --port 18765 --data-dir /data
+docker logs -f my-app-superbtmr
+```
+
+Append `--mcp-manage-ssh-configs` to open the SSH-config write tools to Agents.
+
+If SuperbTmr must share a container with another main process, start it from the existing entrypoint or process manager; otherwise run it as a separate service and reach it at `http://superbtmr:18765/stream`.
+
+### Docker Compose startup
+
+```yaml
+services:
+  superbtmr:
+    build: .
+    entrypoint: ["/usr/local/bin/superbtmr"]
+    command: ["--host", "0.0.0.0", "--port", "18765", "--data-dir", "/data"]
+    environment:
+      - SUPERBTMR_AUTH_TOKEN=change-me-to-a-long-random-secret
+    ports:
+      - "18765:18765"
+    volumes:
+      - superbtmr-data:/data
+
+volumes:
+  superbtmr-data:
+```
+
+```bash
+docker compose up -d --build
+```
+
+## Connecting AI Clients (MCP)
+
+SuperbTmr speaks **both MCP transports** on the same port (18765). Choose whichever your client supports — the tool surface is identical.
+
+SuperbTmr is a long-running service: the same port serves the Web UI, any number of MCP clients, and session persistence. It therefore offers **HTTP transports only** — Streamable HTTP and SSE — and does **not** support stdio (there is no local subprocess mode).
+
+Alternative: the [Agent Skill](#agent-skill-curl-only-no-mcp) drives the same sessions over plain `curl` — the instance serves it at `/skills.md`. The MCP server is one interface layer of the platform, embeddable into any MCP-capable host — Claude Code, Cursor, Codex, Open WebUI, or your own client.
+
+### Option A — Streamable HTTP (`/stream`)
+
+The modern MCP transport; a single endpoint, no separate message path. Use this for Claude Code, Open WebUI, and most current clients.
+
+```json
+{
+  "mcpServers": {
+    "superbtmr": {
+      "type": "http",
+      "url": "http://your-server:18765/stream"
+    }
+  }
+}
+```
+
+```bash
+claude mcp add --transport http superbtmr http://localhost:18765/stream
+```
+
+- Same machine: `http://127.0.0.1:18765/stream`.
+- Open WebUI in Docker, SuperbTmr on the host: `http://host.docker.internal:18765/stream` (macOS/Windows), or the host's LAN IP.
+- Both in Docker on the same network (see [Docker Deployment](#docker-deployment)): `http://superbtmr:18765/stream`.
+
+### Option B — SSE (`/sse`)
+
+The legacy SSE transport. Configure **only** `/sse`; the SDK posts JSON-RPC to `/message` automatically.
+
+```json
+{
+  "mcpServers": {
+    "superbtmr": {
+      "type": "sse",
+      "url": "http://your-server:18765/sse"
+    }
+  }
+}
+```
+
+```bash
+claude mcp add --transport sse superbtmr http://localhost:18765/sse
+```
+
+### Cheat sheet
+
+- Streamable HTTP → `http://<host>:18765/stream`
+- SSE → `http://<host>:18765/sse` (JSON-RPC goes to `POST /message`)
+
+The Web UI's **API / MCP / SKILLS** page (`/api.html`) offers copy-ready config for both transports, plus the Agent-docs and skill-download addresses for this instance.
+
+## Agent Skill (curl-only, no MCP)
+
+Don't want to configure an MCP client? The instance ships an installable
+**Agent Skill** that teaches any agent to drive SuperbTmr with `curl` alone —
+including the `superbtmr://` locators users paste from the Web UI.
+
+```bash
+# Public endpoint: no token needed for the download itself
+curl -fsS http://<host>:18765/skills.md -o /tmp/superbtmr-SKILL.md
+
+# Claude Code reads ~/.claude/skills/<name>/SKILL.md
+mkdir -p ~/.claude/skills/superbtmr && cp /tmp/superbtmr-SKILL.md ~/.claude/skills/superbtmr/SKILL.md
+
+# Other agents that follow the shared convention read ~/.agents/skills/<name>/SKILL.md
+mkdir -p ~/.agents/skills/superbtmr && cp /tmp/superbtmr-SKILL.md ~/.agents/skills/superbtmr/SKILL.md
+```
+
+Restart the agent session after installing (skills are loaded at session start).
+Claude Code has no per-skill CLI command — adding is "drop the file in", removing
+is `rm -rf ~/.claude/skills/superbtmr` (or `claude plugin install/uninstall` when the
+skill ships as a plugin).
+
+Once installed, a request as simple as *"open superbtmr://rock64 and run `uname -a`"*
+works end to end: the skill resolves the locator via
+`GET /api/resolve?url=...`, creates the session with that `ssh_config`, sends the
+command, and polls the output. The same skill is registered as the MCP resource
+`<origin>/skills.md`, and `/api.html` shows the exact install command for the
+instance you are looking at.
+
+## Connecting Scripts / Programs (REST API)
+
+Skip MCP and use the same session layer programmatically: the full REST API and live WebSocket channel.
+
+```bash
+# List sessions (same --auth-token protection)
+curl -H "Authorization: Bearer $SUPERBTMR_AUTH_TOKEN" http://127.0.0.1:18765/api/sessions
+
+# Create a session
+curl -X POST http://127.0.0.1:18765/api/sessions -H "Authorization: Bearer $SUPERBTMR_AUTH_TOKEN" -H 'Content-Type: application/json' -d '{"ssh_config":"internal","command":"bash","mode":"pty"}'
+
+# Read output / upload files / port forwards — see docs/api.md
+```
+
+Live terminal I/O runs over `WebSocket /api/ui/ws`; files support direct HTTP URLs with Range resume. Full endpoint list in [`docs/api.md`](./docs/api.md).
+
+### With authentication enabled
+
+When the server runs with `--auth-token`/`--auth-hash`, every MCP request needs the token as an `Authorization: Bearer` header:
+
+```bash
+claude mcp add --transport http superbtmr http://your-server:18765/stream --header "Authorization: Bearer $SUPERBTMR_AUTH_TOKEN"
+```
+
+```json
+{
+  "mcpServers": {
+    "superbtmr": {
+      "type": "http",
+      "url": "http://your-server:18765/stream",
+      "headers": { "Authorization": "Bearer <your-token>" }
+    }
+  }
+}
+```
+
+Keep the token out of URLs and out of shared configs/screenshots. `curl` and scripts use the same header:
+
+```bash
+curl -H "Authorization: Bearer $SUPERBTMR_AUTH_TOKEN" http://your-server:18765/api/sessions
+```
+
+## Tool Reference
+
+SuperbTmr exposes 31 MCP tools. Full parameters, return shapes, and error codes live in [`docs/mcp-tools.md`](./docs/mcp-tools.md).
+
+| Area | Tools |
+|------|-------|
+| Sessions (connection containers) | `session_start`, `session_list`, `session_info`, `session_terminate` (close; keeps the DEAD entry readable), `session_delete` (permanent) |
+| Shells (terminal channels) | `shell_open`, `shell_list`, `shell_close`, `shell_input`, `shell_key`, `shell_output`, `shell_resize`, `shell_reader_register`, `shell_reader_unregister` |
+| Notifications | `shell_notify` (wakes the AI Agent), `notify_user` (toasts the human at the Web UI) |
+| SSH profiles | `ssh_config` (`list`; `create`/`edit`/`copy`/`delete` with `--mcp-manage-ssh-configs`) |
+| Port forwarding | `forward` (`-L` / `-R` / `-D` / list / close) |
+| Files (SFTP) | `file_read`, `file_write`, `file_stat`, `file_delete`, `file_rename`, `file_mkdir`, `file_urls`, `file_perm`, `file_link`, `file_fs`, `file_getwd` |
+| Transcript index | `message` (span list; bytes via `shell_output`) |
+| Host discovery | `shell_detect` |
+
+Run a command as `shell_input` + `shell_key(key="enter")` + `shell_output`. Failed tools return `isError=true` with a JSON body carrying a stable `error_code`.
+
+## Deferred tool loading
+
+An MCP client fetches every tool's JSON schema in `tools/list`, so tool-heavy servers pay for that in context budget. The MCP spec offers an escape hatch: mark low-frequency tools with `defer_loading`, and a client loads their schema on demand. SuperbTmr's 31 tools split into a hot path of **12** (session lifecycle + shell input/output — always listed) and **19** wide, low-frequency surfaces (the 11 SFTP `file_*` tools, `forward`, `shell_resize`/`shell_detect`/`shell_notify`, `shell_reader_register`/`shell_reader_unregister`, `message`, `ssh_config`).
+
+`--mcp-defer-tools` turns the marker on and is **off by default**, so:
+
+- **Default** — all 31 tools are listed eagerly with full schema. This is what every client that does not implement deferred loading needs — including any Codex that talks to SuperbTmr through a gateway such as AxonHub, which can drop the `defer_loading` marker. With the marker lost, those tools are not reloadable on demand and would simply vanish from the model's view.
+- **`--mcp-defer-tools`** — the 19 low-frequency tools carry `defer_loading`; the 12 core tools stay eager so the `session_start → shell_input → shell_output` loop never requires a search round trip. Clients that support on-demand loading (mcp-go based clients, Claude Code) pay only for the schemas they actually use.
+
+Same 31 tools either way: enabling the flag never removes tools, it only withholds schemas from the initial listing.
+
+## Known Limitations & Security Model
+
+- **File and forward tools need a live connection.** On a closed (DEAD) session they return `session_not_running`; output reading still works via `shell_output`, and a session's port forwards are closed automatically when it goes DEAD.
+- **Basic authentication needs TLS outside localhost.** The browser login challenge uses HTTP Basic, whose credentials are only Base64-encoded. Put a TLS-terminating reverse proxy in front of SuperbTmr when exposing it beyond a trusted local network; the static token is still never logged or placed in a URL.
+
+### 🚨 Security boundary
+
+- **Do not put an Agent on a production host unattended. If you must, turn review mode on.** Every write it makes over MCP — terminal input, file transfer, port forward — then waits in the Web UI for a human to accept or reject it, forcing a person into the loop for every change.
+- **Review mode is not a guarantee of safety.** Review mode needs human confirmation, but a script execution or a file upload can still slip through when the reviewer is careless.
+
+## License
+
+Released under the [MIT License](./LICENSE). You are free to use, modify, and distribute it, provided the copyright notice and permission notice are retained.
+
+---
+
+
+
+
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2786FF,100:6E4AFF&height=110&section=footer" width="100%" alt="footer">
+</p>

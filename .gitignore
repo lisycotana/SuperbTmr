@@ -1,0 +1,38 @@
+__pycache__/
+*.egg-info/
+venv/
+build/
+*.Identifier
+
+# Go build artifacts
+/superbtmr
+/dist/
+*.exe
+*.exe~
+*.test
+*.out
+*.prof
+
+# IDE
+.idea/
+.vscode/
+
+# Data (runtime)
+/data
+
+# Private (author only)
+.claude/
+docs/superpowers/
+
+# OS
+.DS_Store
+
+# other program
+templates/
+.env
+
+# Local-only changelog (not for git)
+/CHANGELOG.local.md
+
+# ZCode agent runtime
+.zcode/
