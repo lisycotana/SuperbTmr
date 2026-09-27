@@ -14,9 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/lisycotana/SuperbTmr">
-  <a href="https://github.com/lisycotana/SuperbTmr">
-    <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=A+team+experiment+platform;Declarative+%C2%B7+Automatic+%C2%B7+Observable;Define+once%2C+run+everywhere%2C+replay+forever;Real+terminals+over+MCP+and+SKILLS" alt="SuperbTmr tagline">
-  </a>
+    <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=An+AI-native+terminal+platform;Cross-platform+%C2%B7+Visual+%C2%B7+Built+for+Human%E2%80%93Agent+Collaboration;One+port%2C+four+entrances;Drive+real+terminals+over+MCP+and+SKILLS" alt="SuperbTmr tagline">
   </a>
 </p>
 
@@ -46,7 +44,7 @@
 
 <p align="center">
   <a href="#introduction"><img src="https://img.shields.io/badge/Introduction-2786ff?style=flat-square" alt="Introduction"></a>
-  <a href="#experiment-platform"><img src="https://img.shields.io/badge/Experiment%20Platform-6E4AFF?style=flat-square" alt="Experiment Platform"></a>
+  <a href="#the-lab-scenario"><img src="https://img.shields.io/badge/The%20Lab%20Scenario-6E4AFF?style=flat-square" alt="The Lab Scenario"></a>
   <a href="#features"><img src="https://img.shields.io/badge/Features-2786ff?style=flat-square" alt="Features"></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-2786ff?style=flat-square" alt="Quick Start"></a>
   <a href="#usage"><img src="https://img.shields.io/badge/Usage-2786ff?style=flat-square" alt="Usage"></a>
@@ -64,23 +62,25 @@
 
 ## Introduction
 
-SuperbTmr is a **team experiment platform**. It takes the way research and engineering teams actually run experiments — scattered across personal terminals, hand-written scripts, `tmux` sessions and chat threads — and gives them one place: a declarative definition, automatic execution across every machine the team owns, live monitoring that notices when something hangs, artifacts pulled back automatically, and every run's full terminal output kept replayable forever.
+Four machines, thirty-two GPUs, a team of six. Every morning somebody asks "which card is free?" in the group chat, and the answer is a screenshot of `nvidia-smi`. Experiments are launched by hand into `tmux`, watched by eye, and a run that hung at 3am looks exactly like one that is still working. Results land in ten places, and the one person who knows how to start a job is on leave.
 
-The reason it can do this is that it is built on a **real terminal session layer**, not a job scheduler. An experiment is not a fire-and-forget command. It is a sequence of multi-turn interactions: a build that prompts for confirmation, a REPL that must be driven line by line, an installer that asks `[Y/n]`, a login that needs a password and then an MFA code. SuperbTmr keeps a genuine terminal alive for each of those — on the local host or over SSH — and lets three kinds of user drive it:
+SuperbTmr is an **AI-native terminal platform**: many hosts and many sessions at once, fully visualized, maintained by humans and AI together — each side free to take over from or hand back to the other at any time. It ships as one pure-Go binary, and it lets three kinds of user drive the same real terminals:
 
 - **You (human)** — a browser-based Web UI for live observation and instant takeover of any session;
 - **AI Agents** — drive the same real terminals through **MCP** or **SKILLS**;
 - **Scripts / programs** — a full REST API plus WebSocket channel for programmatic session, forward, and file operations.
+
+The lab above is not the product — it is the flagship scenario the platform makes possible. Because SuperbTmr gives you real, long-lived, observable terminals on any host while credentials stay server-side, a GPU-aware experiment workflow builds on it directly: live inventory of every card, intelligent placement of each job on whichever host has room, automatic execution, hang detection, and every run's full terminal output replayable afterwards. The same primitives serve security testing, remote operations, embedded bring-up and teaching labs — the platform is deliberately domain-agnostic, and the lab is where it earns its keep.
 
 ### Three layers, one binary
 
 | Layer | What it owns |
 | :--- | :--- |
 | **Terminal & session primitives** | Long-lived PTY / ConPTY sessions, local and over SSH, multi-host and multi-session, paged output, read-only replay of dead sessions, approval gates, server-side credentials, exit / silence / output notifications |
-| **Experiment orchestration** (`internal/exp`) | Declarative experiment definitions, automatic runner, hang detection, artifact collection, parameterised grid sweeps, schedules, audit trail |
+| **Workflow layer** (`internal/exp`, `internal/fleet`) | Declarative job definitions, live host and GPU inventory with leases, intelligent placement, hang detection, artifact collection, parameterised sweeps, schedules, audit trail |
 | **Entrances** | Web UI, MCP, SKILLS, REST + WebSocket — all sharing the same sessions |
 
-The experiment layer is deliberately thin. Launching a step, reading its output, waiting for it to finish, noticing it went quiet, gating it behind a human decision and pulling files back are all things the session, `notify`, approval and `sftp` packages already own. `internal/exp` composes them; it does not reimplement them.
+The workflow layer is deliberately thin. Launching a step, reading its output, waiting for it to finish, noticing it went quiet, gating it behind a human decision and pulling files back are all things the session, `notify`, approval and `sftp` packages already own. The workflow layer composes them; it does not reimplement them.
 
 ### Demo Video
 
@@ -88,28 +88,31 @@ https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
 
 ## Why SuperbTmr
 
-### The problem: experiments have no home
+### The deeper reason labs stay broken
 
-Ask a team where an experiment lives and the answer is a screenshot, a chat thread, a shell history and somebody's laptop. The consequences are predictable:
+Lab tooling has been solved many times over, and labs are still run out of `tmux`. The reason is that two problems sit underneath every scenario, and neither is a lab problem:
 
-- **Not reproducible.** "It worked on my machine" is not a joke, it is the default. Nobody can re-run what ran last Tuesday.
-- **Not comparable.** Ten runs of the same sweep produce ten sets of numbers in ten places, with no way to line them up.
-- **Silently broken.** A run that hung at 3am looks exactly like a run that is still working. Somebody notices on Friday.
-- **Not shareable.** The one person who knows how to launch it is on leave.
+- **Agents can only fire one-shot commands.** An AI agent natively runs `exec` and reads stdout. Real work is *multi-turn interaction*: SSH login needs a password first, a Python REPL is debugged line by line, an installer asks `[Y/n]`, a training job needs a terminal that stays alive for six hours. Give an agent a one-shot shell and it can never participate in the second kind of work.
+- **Machines are not managed resources.** The hosts a team works on are personal terminals with credentials in a chat history and no idea which GPU is idle. Nothing knows what is free, so everything is allocated by shouting.
 
-### The approach: make an experiment a first-class object
+Fix those two and a great deal becomes buildable. SuperbTmr fixes them with one session layer: a genuine terminal per job, on any host, with credentials held server-side so an agent never reads them — and every byte of every session observable, replayable and interruptible by a human.
 
-SuperbTmr promotes an experiment from a shell script to a versioned, reviewable, replayable artefact:
+### The flagship: a multi-machine, multi-GPU lab
 
-- **Declarative** — a JSON definition of targets, steps, expectations, metrics and artifacts. It lives in the repository next to the code, not in someone's history.
-- **Automatic** — the platform resolves connection profiles, opens the sessions, runs the steps in order and records what happened. Nobody has to sit and watch.
-- **Observable** — every step's status, exit code and duration is visible live, and a step that stops producing output for N seconds is declared *hung* rather than left looking busy.
-- **Recoverable** — a crashed or restarted run keeps its full terminal output, readable and replayable, so you pick up from where it broke instead of starting over.
-- **Governed** — dangerous experiments can be gated behind a human decision, and credentials never leave the platform, so an agent can run the whole thing without ever reading a password.
+A research team's cluster, run without anybody watching a terminal:
+
+- **Live inventory.** Every host reports its GPUs — index, model, memory, utilisation — on a schedule. The inventory is produced by the same session layer that runs the jobs: a periodic command in a long-lived session, parsed into a fleet view. There is no second execution mechanism.
+- **Intelligent placement.** A job declares how many cards it needs; the platform looks at what is actually free, picks a host with room, and leases those cards for the run. Jobs spread across hosts instead of queueing behind one busy machine. When nothing has room, the job waits — and the dashboard says why.
+- **One host per job, by design.** SuperbTmr allocates whole jobs to hosts rather than splitting a job across them. Cross-machine distributed training pays a synchronisation tax on every step and fails as a unit; giving each job the cards it needs on one host keeps the fast path fast, and lets different jobs progress independently.
+- **Automatic execution.** The platform resolves connection profiles, opens a session on the chosen host, runs the steps in order and records status, exit code and duration for each. Nobody sits and watches.
+- **Hang detection that actually fires.** A step that declares `silence_timeout_seconds` is declared *hung* when it stops producing output — the same `silence` event the notification kernel already emits. A rank that died at 3am no longer looks like a rank that is training.
+- **Everything replayable.** Each node records the session it ran on, and that session's full terminal output stays readable after the job ends. When an eight-card run dies, every card's output — including the traceback and the NCCL timeouts — is still there to read.
+- **Credentials never leave the platform.** An agent can launch jobs on twenty machines without reading a single password; profiles are resolved server-side and the read interface returns names only.
+- **Humans keep the wheel.** A job can be gated behind a human decision, and when one hangs a person can take over that exact terminal in the browser while the agent carries on with everything else.
 
 ### The foundation it grows out of
 
-None of the above would work on top of a job scheduler, because experiments are not jobs. SuperbTmr's session layer already provides the parts that are hard:
+None of the above would work on top of a job scheduler, because these are not jobs — they are interactive sessions that happen to be long. SuperbTmr's session layer already provides the parts that are hard:
 
 A powerful Web UI manages many hosts and many sessions in one place: start it locally with a single command or deploy the container to the cloud — the browser gets the same interface either way.
 
@@ -138,9 +141,9 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 - **Failure-tolerant, resumable work.** A closed, crashed or restarted session stays in the session list as a read-only DEAD tile with its output readable, so an Agent (or you) can pick up from the interrupted state; reconnecting the same `superbtmr://<entry>` starts a fresh session.
 - **Humans always keep the option to step in.** `notify_user` reaches you directly, privileged prompts are meant to be typed by you in the Web UI, and writes to one shell are serialized, so a human and an Agent can type on the same terminal with their inputs applied in order.
 
-## Experiment Platform
+## The Lab Scenario
 
-### An experiment is a file, not a script
+### A job is a file, not a script
 
 ```json
 {
@@ -150,16 +153,18 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
     { "name": "lr",     "values": ["0.001", "0.01"] },
     { "name": "epochs", "default": "5" }
   ],
+  "resources": { "gpus": 4, "min_mem_mb": 20000 },
   "targets": [
-    { "ssh_config": "gpu-a", "role": "gpu" },
-    { "ssh_config": "gpu-b", "role": "gpu" }
+    { "ssh_config": "gpu-a", "role": "node" },
+    { "ssh_config": "gpu-b", "role": "node" },
+    { "ssh_config": "gpu-c", "role": "node" }
   ],
   "steps": [
     { "name": "prepare", "run": ["mkdir", "-p", "runs/{{lr}}"] },
     { "name": "train",
       "run": ["python", "train.py", "--lr", "{{lr}}", "--epochs", "{{epochs}}"],
       "timeout_seconds": 3600,
-      "expect": { "exit_code": 0, "silence_timeout_seconds": 600 } },
+      "expect": { "exit_code": 0, "silence_timeout_seconds": 900 } },
     { "name": "evaluate", "run": ["python", "eval.py"], "on_failure": "continue" }
   ],
   "metrics": [
@@ -170,17 +175,19 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 }
 ```
 
-Everything a run needs is in that file: which hosts, what to run, what counts as success, what to measure and what to bring home. `{{lr}}` placeholders are substituted per run, and any parameter carrying `values` becomes a **grid axis** — the example above launches two runs, one per learning rate.
+The `resources` block is the interesting part. The platform reads the live GPU inventory, chooses whichever of the three hosts currently has four free cards, leases them for the run, and injects the matching `CUDA_VISIBLE_DEVICES` into the job's environment — so a job never has to guess which cards it got. If no host has room the job waits in the queue and the dashboard says what it is waiting for. `{{lr}}` placeholders are substituted per run, and any parameter carrying `values` becomes a **sweep axis**: the definition above launches two runs, one per learning rate, each placed independently.
 
 ### What the platform does with it
 
 | Capability | How it works |
 | :--- | :--- |
-| **Automatic launch** | Resolves each `ssh_config` profile server-side, opens a session per target, runs the steps in order, records status, exit code and duration per step. |
-| **Hang detection** | A step that declares `silence_timeout_seconds` is judged hung when no output appears for that long — the same `silence` event the notification kernel already emits. |
+| **Live GPU inventory** | Each host reports its cards on a schedule, from a long-lived session running `nvidia-smi` — the same session layer that executes the jobs. |
+| **Intelligent placement** | A job's `gpus` requirement is matched against what is actually free; cards are leased for the run's duration with a heartbeat, and released when it ends or the lease expires. |
+| **Automatic execution** | Connection profiles are resolved server-side, a session opens on the chosen host, steps run in order, and status, exit code and duration are recorded per step. |
+| **Hang detection** | A step declaring `silence_timeout_seconds` is judged hung when no output appears for that long — the same `silence` event the notification kernel already emits. |
 | **Live monitoring** | Step transitions are pushed over the existing WebSocket channel, so the dashboard and any watching agent see progress without polling. |
-| **Artifact collection** | Declared remote files are streamed back over SFTP and hashed, so a run's outputs are on the platform even after the host is gone. |
-| **Result extraction** | Regex metrics are pulled out of step output into a comparable number, so two runs of the same experiment can be lined up. |
+| **Artifact collection** | Declared remote files are streamed back over SFTP and hashed, so a run's outputs survive the host. |
+| **Result extraction** | Regex metrics are pulled out of step output into a comparable number, so two runs of the same job can be lined up. |
 | **Replayable output** | Every node records the `session_id` / `shell_id` it ran on; the raw terminal output stays readable after the run ends. |
 | **Human gate** | `"approval": {"require": true}` holds a run until a person releases it in the Web UI. |
 | **Schedules & audit** | Cron triggers for recurring runs, and an audit trail of who launched or changed what. |
@@ -189,8 +196,9 @@ Everything a run needs is in that file: which hosts, what to run, what counts as
 
 | Phase | Scope |
 | :--- | :--- |
-| **Definition** | JSON experiment specs, parameter surface, grid sweeps, validation |
+| **Definition** | JSON job specs, parameter surface, sweeps, validation |
 | **Execution** | Run state machine, per-target nodes, sequential steps, exit-code and output expectations, timeouts |
+| **Placement** | Host and GPU inventory, leases with heartbeats, best-fit host selection, queueing when nothing has room |
 | **Monitoring** | Hang detection on silence, live step-status push, team notifications, MCP tools |
 | **Results** | Artifact collection over SFTP with hashing, metric extraction, cross-run comparison |
 | **Governance** | Cron schedules, approval gates, audit trail |
@@ -198,7 +206,7 @@ Everything a run needs is in that file: which hosts, what to run, what counts as
 ## Quick Navigation
 
 - [Introduction](#introduction)
-- [Experiment Platform](#experiment-platform)
+- [The Lab Scenario](#the-lab-scenario)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
@@ -212,15 +220,8 @@ Everything a run needs is in that file: which hosts, what to run, what counts as
 
 ## Features
 
-- **🧪 Experiments as versioned files** — A JSON definition of targets, steps, expectations, metrics and artifacts lives in the repository next to the code. Every run records the spec version it came from, so a historical run can always be explained.
-- **🚀 Automatic execution** — The platform resolves connection profiles, opens one session per target, runs the steps in order and records status, exit code and duration for each. Nobody has to sit and watch.
-- **📡 Monitoring that notices hang** — A step declaring `silence_timeout_seconds` is declared *hung* when it stops producing output, instead of sitting there looking busy until somebody notices on Friday.
-- **🔁 Parameterised grid sweeps** — Any parameter carrying `values` becomes an axis; `{{param}}` placeholders are substituted per run. One file, dozens of runs, comparable results.
-- **📦 Artifacts pulled home** — Declared remote files are streamed back over SFTP and hashed, so a run's outputs survive the host.
-- **📈 Metrics out of the output** — Regex rules extract numbers from step output into a comparable value, so two runs of the same experiment can be lined up instead of eyeballed.
-- **⏱ Schedules** — Cron triggers for recurring runs, with the last run id kept on the schedule.
 - **⚡ One-command install, pure Go, no CGO** — `go install github.com/lisycotana/SuperbTmr@latest`; builds with `CGO_ENABLED=0` and binds no system shared libraries, so one static binary runs anywhere and cross-compiles natively (ConPTY on Windows, POSIX PTY on macOS / Linux — same behaviour everywhere).
-- **🔌 One port, four entrances** — Web UI (humans), MCP / SKILLS (Agents), and REST + WebSocket (scripts) share one port.
+- **🔌 One port, four entrances** — Web UI (humans), MCP / SKILLS (Agents), and REST + WebSocket (scripts) share one port, all addressing the same real sessions.
 - **🤝 Human–AI relay** — You and the Agent share one live session and you can take over or interrupt at any time; the Agent pauses at `sudo` / password / MFA prompts for you to type in the Web UI; input is serialized so keystrokes never collide.
 - **🟦 Multi-turn interaction on a real terminal** — The process keeps running, so an Agent drives TUIs, REPLs, GDB, msfconsole, or vim across conversation turns; a full PTY (ConPTY on Windows) behaves the same on every platform.
 - **🟫 Local or remote, one workflow** — Zero-config access to the SuperbTmr host (`ssh_config="internal"`) or any remote machine over SSH profiles; commands, file transfer (SFTP plus resumable HTTP URLs), and port forwarding (`-L` / `-R` / `-D`) all run over that single connection.
@@ -228,8 +229,20 @@ Everything a run needs is in that file: which hosts, what to run, what counts as
 - **🟨 Multiple Agents, no lost output** — Parallel readers of one session keep independent cursors; a closed session (explicit close, exit, crash, or restart) stays in the registry as a read-only DEAD tile with its full output intact, so you can still replay, page through, or delete it whenever you like. After a drop, open a fresh session from the same entry (`superbtmr://<entry>`) and carry on.
 - **🟥 Proactive notifications, no polling** — `shell_notify` wakes the Agent on process exit, silence, or new output — signal only, no payload (pull the text when needed); `channel="sampling"` sends `sampling/createMessage` directly.
 - **🌐 Multi-language Web UI** — The interface follows the browser language on first load and can be overridden from the header; the choice is remembered, and switching never reloads the page or rebuilds open terminals.
-- **🔍 Optional review mode** — Under it, the Agent's command executions and file changes run only after human approval — for production hosts. Experiments can opt into the same gate with `"approval": {"require": true}`.
+- **🔍 Optional review mode** — Under it, the Agent's command executions and file changes run only after human approval — for production hosts. A job can opt into the same gate with `"approval": {"require": true}`.
 - **🔒 Credential-safe by design** — Passwords, private keys, and passphrases written through `ssh_config` are never readable back, so plaintext never enters the Agent's context; config-writing tools stay off unless `--mcp-manage-ssh-configs` is set.
+
+**On top of the platform — the multi-machine, multi-GPU lab scenario:**
+
+- **🖥 Live GPU fleet inventory** — Every host reports its cards on a schedule from a long-lived session, so the dashboard always knows which machine has room.
+- **🧪 Jobs as versioned files** — A JSON definition of resources, targets, steps, expectations, metrics and artifacts lives in the repository next to the code. Every run records the spec version it came from.
+- **🚀 Intelligent placement and automatic execution** — A job declares how many cards it needs; the platform picks a host with room, leases those cards, injects the matching `CUDA_VISIBLE_DEVICES`, opens the session and runs the steps in order. Nobody sits and watches, and jobs spread across hosts instead of queueing behind one busy machine.
+- **📡 Hang detection that actually fires** — A step declaring `silence_timeout_seconds` is declared *hung* when it stops producing output, instead of sitting there looking busy until somebody notices on Friday.
+- **🔁 Parameterised sweeps** — Any parameter carrying `values` becomes an axis; `{{param}}` placeholders are substituted per run. One file, dozens of runs, each placed independently.
+- **📦 Artifacts pulled home** — Declared remote files are streamed back over SFTP and hashed, so a run's outputs survive the host.
+- **📈 Metrics out of the output** — Regex rules extract numbers from step output into a comparable value, so two runs of the same job can be lined up instead of eyeballed.
+- **⏱ Schedules** — Cron triggers for recurring jobs, with the last run id kept on the schedule.
+
 ## Quick Start
 
 ### Quick Install (Go toolchain required)
