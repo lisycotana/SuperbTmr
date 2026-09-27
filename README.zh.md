@@ -4,12 +4,6 @@
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2786FF,50:6E4AFF,100:FF69B4&height=150&section=header" width="100%" alt="header banner">
 </p>
 
-<p align="center">
-  <a href="https://github.com/lisycotana/SuperbTmr">
-    <img src="./docs/assets/logo.png" width="150" alt="SuperbTmr logo">
-  </a>
-</p>
-
 <h1 align="center">⚡ SuperbTmr</h1>
 
 <p align="center">
@@ -84,10 +78,6 @@ SuperbTmr 让 AI Agent 成为终端前的常驻工作者。它自己登进机器
 
 工作流层刻意做薄。启动一个步骤、读取它的输出、等它结束、发现它安静下来、把它挡在人工决策之后、把文件取回来——这些 `session`、`notify`、`approval`、`sftp` 包本来就已经具备。工作流层负责编排它们，而不是重新实现。
 
-### 演示视频
-
-https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
-
 ## 为什么选 SuperbTmr
 
 ### 为什么在这之前不可能
@@ -127,7 +117,6 @@ https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
 
 功能强大的 Web UI 在一处管理多主机、多会话：本地一行命令启动，或把容器部署到云端——浏览器里是同一套界面。
 
-![pic2](docs/assets/pic2_zh.png)
 
 - **多会话仪表盘**：每个运行中的会话按名称列出，随时切换或接管。
 - **实时观摩**：在浏览器里看 `htop` 的实时刷新、`vim` 的编辑过程、安装程序的提示，和本地终端一样。
@@ -143,7 +132,6 @@ https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
 
 Agent 天生只能下发一次性命令，而真实工作大多是**多轮交互**——SSH 登录先要密码，Python REPL 逐行调试，安装器问 `[Y/n]`，`top`/`htop`/impacket 这类工具需要真终端。SuperbTmr 交给 Agent 一个真实终端：会话长驻并被复用，因此 **TUI**、**REPL**、**GDB**、**msfconsole**、**vim** 都能像人一样跨轮次持续驱动——通过 MCP，或通过实例自带的 [Agent Skill](#agent-skill纯-curl无需-mcp) 用纯 `curl`。
 
-![pic1](docs/assets/pic1_zh.png)
 
 - **同一套会话层，平级入口。** MCP、SKILLS、REST/WebSocket 与 Web UI 同处一层，共用同一批真实会话。Agent 的每一步操作，你在浏览器里都看得见、随时能接管；反过来，Agent 需要时也可以停下来，把密码/MFA 提示交给你输入。
 - **为 token 与轮次预算设计。** 工具 schema 紧凑、支持按需延迟加载（见 [`docs/mcp-tools.md`](./docs/mcp-tools.md)）；`shell_output` 用 tail/offset 游标分页，模型上下文只载入你真正需要的输出；`shell_notify` 只发唤醒信号。

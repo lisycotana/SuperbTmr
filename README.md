@@ -4,12 +4,6 @@
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2786FF,50:6E4AFF,100:FF69B4&height=150&section=header" width="100%" alt="header banner">
 </p>
 
-<p align="center">
-  <a href="https://github.com/lisycotana/SuperbTmr">
-    <img src="./docs/assets/logo.png" width="150" alt="SuperbTmr logo">
-  </a>
-</p>
-
 <h1 align="center">⚡ SuperbTmr</h1>
 
 <p align="center">
@@ -84,10 +78,6 @@ Experiments are not the product — they are the flagship scenario the platform 
 
 The workflow layer is deliberately thin. Launching a step, reading its output, waiting for it to finish, noticing it went quiet, gating it behind a human decision and pulling files back are all things the session, `notify`, approval and `sftp` packages already own. The workflow layer composes them; it does not reimplement them.
 
-### Demo Video
-
-https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
-
 ## Why SuperbTmr
 
 ### Why this was impossible until now
@@ -127,7 +117,6 @@ None of the above would work on top of a job scheduler, because these are not jo
 
 A powerful Web UI manages many hosts and many sessions in one place: start it locally with a single command or deploy the container to the cloud — the browser gets the same interface either way.
 
-![pic2](docs/assets/pic2.png)
 
 - **Multi-session dashboard**: every running session listed by name, switch or take over at any time.
 - **Real-time observation**: watch `htop`'s live display, `vim`'s editing process, or an installer's prompts in the browser, just like a local terminal.
@@ -142,8 +131,6 @@ A powerful Web UI manages many hosts and many sessions in one place: start it lo
 Seamless human–agent interaction and pair operation: the Agent is a standing user of the terminal, alongside you and your scripts.
 
 An Agent natively runs only one-shot commands, while real work is largely **multi-turn interaction** — SSH login needs a password first, a Python REPL is debugged line by line, an installer asks `[Y/n]`, tools like `top`/`htop`/impacket need a terminal. SuperbTmr hands the Agent a real terminal: one session stays alive and gets reused, so **TUIs**, **REPLs**, **GDB**, **msfconsole** and **vim** can be driven continuously the way a human would — through MCP or through the instance's own [Agent Skill](#agent-skill-curl-only-no-mcp) over plain `curl`.
-
-![pic1](docs/assets/pic1.png)
 
 - **One session layer, peer entrances.** MCP, SKILLS and REST/WebSocket sit at the same level as the Web UI, sharing the same real sessions. You can watch every Agent step in the browser and take over at any time; the Agent in turn can pause and hand a password/MFA prompt to you.
 - **Built for token and turn budgets.** Tool schemas are compact and can be deferred-loaded (see [`docs/mcp-tools.md`](./docs/mcp-tools.md)); `shell_output` pages by tail/offset cursors so only the slices you ask for ever enter the context window; `shell_notify` sends a bare wake-up signal.
