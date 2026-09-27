@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/lisycotana/SuperbTmr">
-    <img src="https://readme-typing-svg.demolab.com?font=Noto+Sans+SC&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=%E4%B8%80%E4%B8%AA+AI+Native+%E7%9A%84%E7%BB%88%E7%AB%AF%E5%B9%B3%E5%8F%B0;%E8%B7%A8%E5%B9%B3%E5%8F%B0+%C2%B7+%E5%8F%AF%E8%A7%86%E5%8C%96+%C2%B7+%E4%BA%BA%E6%9C%BA%E5%8D%8F%E4%BD%9C;%E4%B8%80%E4%B8%AA%E7%AB%AF%E5%8F%A3%EF%BC%8C%E5%9B%9B%E4%B8%AA%E5%85%A5%E5%8F%A3;%E7%94%A8+MCP+%E4%B8%8E+SKILLS+%E9%A9%B1%E5%8A%A8%E7%9C%9F%E5%AE%9E%E7%BB%88%E7%AB%AF" alt="SuperbTmr 标语">
+    <img src="https://readme-typing-svg.demolab.com?font=Noto+Sans+SC&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=%E5%9B%A2%E9%98%9F%E5%AE%9E%E9%AA%8C%E5%B9%B3%E5%8F%B0;%E5%A3%B0%E6%98%8E%E5%BC%8F+%C2%B7+%E8%87%AA%E5%8A%A8%E5%8C%96+%C2%B7+%E5%8F%AF%E8%A7%82%E6%B5%8B;%E5%86%99%E4%B8%80%E6%AC%A1%EF%BC%8C%E5%A4%9A%E5%A4%84%E8%BF%90%E8%A1%8C%EF%BC%8C%E6%B0%B8%E4%B9%85%E5%9B%9E%E6%94%BE;%E7%94%A8+MCP+%E4%B8%8E+SKILLS+%E9%A9%B1%E5%8A%A8%E7%9C%9F%E5%AE%9E%E7%BB%88%E7%AB%AF" alt="SuperbTmr 标语">
   </a>
 </p>
 
@@ -43,6 +43,8 @@
 </p>
 
 <p align="center">
+  <a href="#简介"><img src="https://img.shields.io/badge/%E7%AE%80%E4%BB%8B-2786ff?style=flat-square" alt="简介"></a>
+  <a href="#实验平台"><img src="https://img.shields.io/badge/%E5%AE%9E%E9%AA%8C%E5%B9%B3%E5%8F%B0-6E4AFF?style=flat-square" alt="实验平台"></a>
   <a href="#功能特性"><img src="https://img.shields.io/badge/%E5%8A%9F%E8%83%BD%E7%89%B9%E6%80%A7-2786ff?style=flat-square" alt="功能特性"></a>
   <a href="#快速开始"><img src="https://img.shields.io/badge/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B-2786ff?style=flat-square" alt="快速开始"></a>
   <a href="#使用"><img src="https://img.shields.io/badge/%E4%BD%BF%E7%94%A8-2786ff?style=flat-square" alt="使用"></a>
@@ -60,15 +62,23 @@
 
 ## 简介
 
-SuperbTmr 是一个面向远程实验教学与多机课程场景的共享终端工作台。一个实例即可让所有学生、助教和 AI Agent 共用同一批真实终端——本机或经 SSH——通过同一个浏览器页面完成实时观摩、随时接管，并留下可追溯的操作记录。
+SuperbTmr 是一个**团队实验平台**。它针对研究团队与工程团队真正运行实验的方式——散落在个人终端、手写脚本、`tmux` 会话和聊天记录里——给出一个统一的所在：一份声明式定义、在团队拥有的每台机器上自动执行、能发现卡死的实时监控、自动回收的产物，以及每一次运行完整终端输出的永久回放。
 
-它源于一个观察：真正的技术工作几乎从来不是单条命令。编译、调试、配置、安装都是需要终端**持续存活**的多轮交互；而 AI Agent 天生只能下发一次性命令，教学实验室的终端又分散在 VNC、屏幕共享和手写脚本里。SuperbTmr 用一层统一的会话来同时弥合这两道裂缝：
+它之所以能做到这些，是因为它建立在**真实终端会话层**之上，而不是一个作业调度器。实验不是一条发完就不管的命令，而是一连串多轮交互：会停下来等确认的编译、需要逐行驱动的 REPL、会问 `[Y/n]` 的安装程序、先要密码再要 MFA 码的登录。SuperbTmr 为这些交互各保留一个真正的终端——本机或经 SSH——并让三类用户共同驱动：
 
 - **人** —— 浏览器实时查看、操作、接管任何会话；
 - **AI Agent** —— 通过 MCP 或 SKILLS 驱动同一批终端；
 - **脚本 / 程序** —— 通过 REST API 编程化接入。
 
-平台层提供长驻会话与只读回放、多主机多会话并行编排、SSH 连接全生命周期管理，让整个过程**可观测、可编程、人机接力**。跨平台、云原生、纯 Go 无 CGO；单二进制、低开销、可长期驻留。
+### 三层结构，一个二进制
+
+| 层 | 职责 |
+| :--- | :--- |
+| **终端与会话原语** | 长驻 PTY / ConPTY 会话、本机与 SSH、多主机多会话、分页输出、死会话只读回放、审批门、服务端凭据、退出 / 静默 / 输出通知 |
+| **实验编排层**（`internal/exp`） | 声明式实验定义、自动执行器、卡死检测、产物回收、参数化网格扫描、定时触发、审计轨迹 |
+| **入口** | Web UI、MCP、SKILLS、REST + WebSocket——共用同一批会话 |
+
+实验编排层刻意做薄。启动一个步骤、读取它的输出、等它结束、发现它安静下来、把它挡在人工决策之后、把文件取回来——这些 `session`、`notify`、`approval`、`sftp` 包本来就已经具备。`internal/exp` 负责编排它们，而不是重新实现。
 
 ### 演示视频
 
@@ -76,39 +86,117 @@ https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
 
 ## 为什么选 SuperbTmr
 
-### 多会话可视化管理
+### 问题：实验没有家
 
-功能强大的 Web UI 把多主机、多会话集中到一个界面里管理：本地一条命令启动，或容器化部署到云端，浏览器访问的都是同一套操作界面。
+问一个团队某个实验在哪，答案是一张截图、一段聊天记录、一份 shell history 和某台笔记本。后果是可想而知的：
 
-![pic2_zh](docs/assets/pic2_zh.png)
+- **不可复现。** "在我机器上是好的" 不是玩笑，而是默认状态。没人能重跑上周二跑过的东西。
+- **不可比较。** 同一批扫描跑十次，产出十份数字散在十处，没法对齐。
+- **静默失败。** 凌晨三点卡住的运行，和还在正常工作的运行看起来一模一样。总要到周五才有人发现。
+- **无法共享。** 唯一知道怎么启动它的人在休假。
 
-- **多会话仪表盘**：所有运行中的会话按名称列出，随时切换、随时接管。
-- **实时行为观测**：像操作本地终端一样，在浏览器里看 `htop` 的动态界面、`vim` 的编辑过程、安装程序的彩色提示。
-- **标签化与平铺工作区**：一个 SSH 会话下可开多个 shell，各占一个标签；多个会话也可平铺展示，同时跟踪。
-- **端口转发可视化**：会话相关的本地/远程端口与协议一目了然。
-- **文件管理**：浏览目录、上传下载、重命名、建目录，都在管理界面里完成。
-- **连接模板集中托管**：统一 SSH 配置管理；AI 开启会话时只指定配置名，读不到具体配置。
-- **已关闭会话只读回放**：会话关闭、崩溃或重启后，完整输出仍可翻阅。
+### 做法：让实验成为一等对象
+
+SuperbTmr 把实验从一个 shell 脚本提升为可版本化、可审查、可回放的工件：
+
+- **声明式** —— 一份 JSON 定义，写清目标机、步骤、成功判据、指标与产物。它和代码一起待在仓库里，而不是待在某人的 history 里。
+- **自动化** —— 平台自行解析连接配置、打开会话、按序执行步骤并记录过程。不需要有人盯着。
+- **可观测** —— 每一步的状态、退出码与耗时实时可见；停止输出 N 秒的步骤会被判定为*卡死*，而不是继续装忙。
+- **可恢复** —— 崩溃或重启的运行保留完整终端输出，可读可回放，从断点继续而不是从头再来。
+- **可治理** —— 危险实验可以挡在人工决策之后；凭据从不离开平台，Agent 能跑完整套流程而无需读取任何密码。
+
+### 它生长于其上的地基
+
+上述一切如果架在作业调度器上是不可能的，因为实验不是作业。SuperbTmr 的会话层已经提供了最难的那些部分：
+
+功能强大的 Web UI 在一处管理多主机、多会话：本地一行命令启动，或把容器部署到云端——浏览器里是同一套界面。
+
+![pic2](docs/assets/pic2_zh.png)
+
+- **多会话仪表盘**：每个运行中的会话按名称列出，随时切换或接管。
+- **实时观摩**：在浏览器里看 `htop` 的实时刷新、`vim` 的编辑过程、安装程序的提示，和本地终端一样。
+- **标签页与平铺工作区**：一个 SSH 会话可开多个 shell，各自一个标签；会话也可并排平铺、统一跟踪。
+- **端口转发一览**：每个会话的本机/远端端口与协议，集中在一个面板里。
+- **文件管理**：在界面里浏览、上传、下载、重命名、新建目录。
+- **集中式连接模板**：统一的 SSH 配置存储；Agent 按 profile 名打开会话，从不读取配置本身。
+- **死会话只读回放**：会话关闭、崩溃或重启后，输出仍可浏览。
 
 ### AI Native 设计
 
-无缝人机交互、结对操作：Agent 是终端的常驻用户，与你和脚本并列。
+无缝的人机交互与结对操作：Agent 是终端的常驻用户，与你和你的脚本并列。
 
-Agent 原生只能执行一次性命令，而真实工作大量是**多轮交互**（SSH 登录先输密码、Python REPL 逐行调试、回答安装程序的 `[Y/n]` 提示、驱动 `top`/`htop`/impacket）。SuperbTmr 把真实终端直接交给 Agent：会话持续复用，**TUI**、**REPL**、**GDB**、**msfconsole**、**vim** 都能像人一样被持续管理——走 MCP，或用实例自带的 [Agent Skill](#agent-skill纯-curl无需-mcp) 走纯 `curl`。
+Agent 天生只能下发一次性命令，而真实工作大多是**多轮交互**——SSH 登录先要密码，Python REPL 逐行调试，安装器问 `[Y/n]`，`top`/`htop`/impacket 这类工具需要真终端。SuperbTmr 交给 Agent 一个真实终端：会话长驻并被复用，因此 **TUI**、**REPL**、**GDB**、**msfconsole**、**vim** 都能像人一样跨轮次持续驱动——通过 MCP，或通过实例自带的 [Agent Skill](#agent-skill纯-curl无需-mcp) 用纯 `curl`。
 
-![pic1_zh](docs/assets/pic1_zh.png)
-
-
+![pic1](docs/assets/pic1_zh.png)
 
 - **同一套会话层，平级入口。** MCP、SKILLS、REST/WebSocket 与 Web UI 同处一层，共用同一批真实会话。Agent 的每一步操作，你在浏览器里都看得见、随时能接管；反过来，Agent 需要时也可以停下来，把密码/MFA 提示交给你输入。
 - **为 token 与轮次预算设计。** 工具 schema 紧凑、支持按需延迟加载（见 [`docs/mcp-tools.md`](./docs/mcp-tools.md)）；`shell_output` 用 tail/offset 游标分页，模型上下文只载入你真正需要的输出；`shell_notify` 只发唤醒信号。
-- **实例自描述。** 每个运行中的 SuperbTmr 都对外提供自己的 `/api.md` 与 `/skills.md`（免 token），并注册为 MCP resources 与 `learn-api` prompt；新 Agent 单单靠这两个文件就能驱动这个实例的当前版本。
-- **密钥留在平台侧。** 经 `ssh_config` 写入的密码、私钥、口令仅保存在平台侧，MCP 的读取接口只返回配置名；SSH 配置写入工具默认关闭，需运维显式开启 `--mcp-manage-ssh-configs`。
-- **失败可恢复。** 关闭、崩溃或重启过的会话仍以只读 DEAD 条目留在会话列表里，输出依旧可读，Agent（或你）可以接着中断前的状态继续；重连同一个 `superbtmr://<entry>` 即可开启下一段会话。
-- **人始终保留中断权。** `notify_user` 可直接通知到你；需要提权的提示由你在 Web UI 里输入；同一 shell 的写入串行化，人与 Agent 的输入按序生效。
+- **实例自描述。** 每个运行中的 SuperbTmr 都对外提供自己的 `/api.md` 与 `/skills.md`（免 token），并注册为 MCP resources 与 `learn-api` prompt；新 Agent 单单靠这两个文件就能驱动这个实例。
+- **密钥留在服务端。** 经 `ssh_config` 写入的密码、私钥与 passphrase 只存放在主机上，MCP 读接口只返回 profile 名称；SSH 配置写工具默认关闭，需 `--mcp-manage-ssh-configs` 显式开启。
+- **失败可恢复的工作。** 关闭、崩溃或重启后的会话以只读 DEAD 状态留在会话列表里，输出完整可读；从同一 `superbtmr://<entry>` 重连即可开新会话继续。
+- **人永远保留介入权。** `notify_user` 可直接呼叫操作者，特权提示设计上就由人在 Web UI 输入，同一 shell 的写入被串行化，人与 Agent 在同一终端上输入会按序生效。
+
+## 实验平台
+
+### 实验是一个文件，不是一段脚本
+
+```json
+{
+  "name": "resnet-finetune",
+  "description": "在 CIFAR-10 划分上微调 ResNet-18 并报告 top-1。",
+  "params": [
+    { "name": "lr",     "values": ["0.001", "0.01"] },
+    { "name": "epochs", "default": "5" }
+  ],
+  "targets": [
+    { "ssh_config": "gpu-a", "role": "gpu" },
+    { "ssh_config": "gpu-b", "role": "gpu" }
+  ],
+  "steps": [
+    { "name": "prepare", "run": ["mkdir", "-p", "runs/{{lr}}"] },
+    { "name": "train",
+      "run": ["python", "train.py", "--lr", "{{lr}}", "--epochs", "{{epochs}}"],
+      "timeout_seconds": 3600,
+      "expect": { "exit_code": 0, "silence_timeout_seconds": 600 } },
+    { "name": "evaluate", "run": ["python", "eval.py"], "on_failure": "continue" }
+  ],
+  "metrics": [
+    { "name": "top1", "pattern": "top-1 accuracy: ([0-9.]+)", "step": "evaluate" }
+  ],
+  "artifacts": [ { "path": "runs/{{lr}}/model.pt" } ],
+  "notify": { "on_finish": true, "on_fail": true }
+}
+```
+
+一次运行所需的一切都在这个文件里：在哪些机器上、跑什么、什么算成功、测什么、带回什么。`{{lr}}` 占位符按运行替换，任何带 `values` 的参数都会成为一条**网格轴**——上面这个例子会启动两次运行，每个学习率一次。
+
+### 平台拿它做什么
+
+| 能力 | 实现方式 |
+| :--- | :--- |
+| **自动执行** | 服务端解析每个 `ssh_config` profile，为每个目标开一个会话，按序执行步骤，逐步记录状态、退出码与耗时。 |
+| **卡死检测** | 声明了 `silence_timeout_seconds` 的步骤，在静默达到该时长时被判为卡死——复用的正是通知内核早已在发的 `silence` 事件。 |
+| **实时监控** | 步骤状态迁移经既有 WebSocket 通道推送，仪表盘与任何监看的 Agent 都无需轮询即可看到进度。 |
+| **产物回收** | 声明的远端文件经 SFTP 流式取回并计算哈希，主机没了，运行的产出还在平台上。 |
+| **结果提取** | 用正则从步骤输出中抽出数字，成为可比较的指标，两次运行可以对齐而不是靠肉眼。 |
+| **输出可回放** | 每个节点记录它跑在哪个 `session_id` / `shell_id` 上；运行结束后原始终端输出依然可读。 |
+| **人工闸门** | `"approval": {"require": true}` 让一次运行挂起，直到有人在 Web UI 放行。 |
+| **定时与审计** | cron 触发周期性运行；谁启动、谁改动了什么，都有审计轨迹。 |
+
+### 这一层是怎么拼起来的
+
+| 环节 | 内容 |
+| :--- | :--- |
+| **定义** | JSON 实验规格、参数面、网格扫描、校验 |
+| **执行** | 运行状态机、按目标的节点、顺序步骤、退出码与输出判据、超时 |
+| **监控** | 基于静默的卡死检测、步骤状态实时推送、团队通知、MCP 工具 |
+| **结果** | SFTP 产物回收与哈希、指标提取、跨运行对比 |
+| **治理** | cron 定时、审批门、审计轨迹 |
 
 ## 快速导航
 
+- [简介](#简介)
+- [实验平台](#实验平台)
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
 - [使用](#使用)
@@ -116,24 +204,28 @@ Agent 原生只能执行一次性命令，而真实工作大量是**多轮交互
 - [接入 AI 客户端（MCP）](#接入-ai-客户端mcp)
 - [Agent Skill（纯 curl，无需 MCP）](#agent-skill纯-curl无需-mcp)
 - [接入脚本 / 程序（REST API）](#接入脚本--程序rest-api)
-- [示例](#示例)
 - [工具参考](#工具参考)
 - [已知限制与安全模型](#已知限制与安全模型)
-
 ## 功能特性
 
+- **🧪 实验是可版本化的文件** —— 一份 JSON 定义写清目标机、步骤、成功判据、指标与产物，和代码一起待在仓库里。每次运行都记录它来自哪个规格版本，历史运行永远解释得清。
+- **🚀 自动执行** —— 平台自行解析连接配置、为每个目标开一个会话、按序执行步骤，并逐步记录状态、退出码与耗时。不需要有人盯着。
+- **📡 会报警的监控** —— 声明了 `silence_timeout_seconds` 的步骤一旦停止输出就被判为*卡死*，而不是一直装忙到周五才被人发现。
+- **🔁 参数化网格扫描** —— 任何带 `values` 的参数都会成为一条轴；`{{param}}` 占位符按运行替换。一个文件，几十次运行，结果可比较。
+- **📦 产物自动回收** —— 声明的远端文件经 SFTP 流式取回并计算哈希，主机没了，运行的产出还在。
+- **📈 从输出里提取指标** —— 用正则从步骤输出中抽出数字成为可比较的值，同一实验的两次运行可以对齐，而不是靠肉眼比。
+- **⏱ 定时触发** —— cron 触发周期性运行，schedule 上保留最近一次运行的 id。
 - **⚡ 一行安装，纯 Go 无 CGO** —— `go install github.com/lisycotana/SuperbTmr@latest`；无 CGO 依赖（`CGO_ENABLED=0`），零系统动态库绑定，单静态二进制随处分发，原生完美跨平台（Windows ConPTY、macOS / Linux POSIX PTY 行为高度一致）。
-- **🔌 一个端口，四个入口** —— Web UI（人）、MCP / SKILLS（Agent）、REST + WebSocket（脚本）共用同一端口。
-- **🤝 人机接力** —— 人与 Agent 共用同一实时会话，你可随时接管或中断 Agent；遇到 `sudo` / 密码 / MFA 提示时 Agent 暂停，由你在 Web UI 输入；同一 shell 输入串行，互不打断。
-- **🟦 多轮交互的真实终端** —— 进程持续运行，Agent 可跨对话轮次驱动 TUI、REPL、GDB、msfconsole、vim 等程序；完整 PTY（Windows 走 ConPTY），各平台行为一致。
-- **🟫 本机 / 远程同一套流程** —— 零配置操作本机（`ssh_config="internal"`）或经 SSH profile 接入远程主机；命令、文件传输（SFTP + 可断点续传的 HTTP 直链）与端口转发（`-L` / `-R` / `-D`）都在同一条连接内完成。
-- **🟧 内置可视化管理** —— 浏览器实时终端、多会话仪表盘、多标签频道、平铺工作区、已关闭会话只读回放、文件与转发面板；`/api.html` 提供 API / MCP / SKILLS 速查。
-- **🟨 多 Agent 并行，断开不丢输出** —— 多个 Agent 同时读同一会话、各自游标互不抢占；会话关闭后（显式关闭、自然退出、断线或重启）仍以只读 DEAD tile 留在列表中，输出完整可回放、翻页或删除；断线后用同一个 entry（`superbtmr://<entry>`）新起一个会话即可接着干。
-- **🟥 主动通知，免轮询** —— `shell_notify` 在进程退出 / 输出停顿 / 有新输出时主动唤醒 Agent，只发信令、不带内容（正文另行拉取）；`channel="sampling"` 时直接发送 `sampling/createMessage`。
-- **🌐 Web UI 多语言支持** —— 界面按浏览器语言自动选择，也可在标题栏手动切换；选择会被记住，切换语言不刷新页面、不重建已打开的终端。
-- **🔍 可开启审阅模式** —— 审阅模式下 AI 的命令执行和文件改动需人工批准才会执行，用于生产环境。
-- **🔒 凭据安全** —— 经 `ssh_config` 写入的密码、私钥、口令一律不可读回，明文凭据不进入 Agent 上下文；配置写入类工具默认关闭，需显式开启 `--mcp-manage-ssh-configs`。
-
+- **🔌 一个端口，四类入口** —— Web UI（人）、MCP / SKILLS（Agent）、REST + WebSocket（脚本）共用同一个端口，访问同一批真实会话。
+- **🤝 人机接力** —— 你与 Agent 共用同一活会话，随时可以接管或打断；Agent 在 `sudo` / 密码 / MFA 提示处停下，由你在 Web UI 输入；输入串行化，按键不冲突。
+- **🟦 真实终端上的多轮交互** —— 进程持续运行，Agent 可以跨对话轮次驱动 TUI、REPL、GDB、msfconsole、vim；完整 PTY（Windows 上为 ConPTY）在各平台行为一致。
+- **🟫 本地与远程，一套流程** —— 零配置访问本机（`ssh_config="internal"`），或经 SSH profile 访问任意远端；命令、文件传输（SFTP 加可续传 HTTP URL）、端口转发（`-L` / `-R` / `-D`）都走同一条连接。
+- **🟧 内置可视化管理** —— 浏览器实时终端、会话仪表盘、标签化 shell、平铺工作区、死会话只读回放、文件与转发面板；`/api.html` 提供 API / MCP / SKILLS 速查表。
+- **🟨 多 Agent 并行，不丢输出** —— 同一会话的多个并行读者各自持有独立游标；关闭（主动关闭、退出、崩溃或重启）后的会话以只读 DEAD 条目留在注册表里，完整输出仍可回放、翻页或删除。掉线后从同一 `superbtmr://<entry>` 开新会话即可继续。
+- **🟥 主动通知，无需轮询** —— `shell_notify` 在进程退出、静默或出现新输出时唤醒 Agent，只发信号不带载荷（需要时再取文本）；`channel="sampling"` 直接发送 `sampling/createMessage`。
+- **🌐 多语言 Web UI** —— 首次加载跟随浏览器语言，可在页头覆盖；选择被记住，切换时不重载页面、不重建已开终端。
+- **🔍 可选审阅模式** —— 开启后 Agent 的命令执行与文件变更必须先经人工批准——面向生产主机。实验也可以用 `"approval": {"require": true}` 接入同一道闸门。
+- **🔒 凭据安全设计** —— 经 `ssh_config` 写入的密码、私钥与 passphrase 永不可读回，明文不进 Agent 上下文；配置写工具默认关闭，除非 `--mcp-manage-ssh-configs`。
 ## 快速开始
 
 ### 快速安装（需要 Go 环境）

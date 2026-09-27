@@ -14,7 +14,9 @@
 
 <p align="center">
   <a href="https://github.com/lisycotana/SuperbTmr">
-    <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=An+AI-native+terminal+platform;Cross-platform+%C2%B7+Visual+%C2%B7+Built+for+Human%E2%80%93Agent+Collaboration;One+port%2C+four+entrances;Drive+real+terminals+over+MCP+and+SKILLS" alt="SuperbTmr tagline">
+  <a href="https://github.com/lisycotana/SuperbTmr">
+    <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=20&pause=900&color=2786FF&center=true&vCenter=true&width=860&height=45&lines=A+team+experiment+platform;Declarative+%C2%B7+Automatic+%C2%B7+Observable;Define+once%2C+run+everywhere%2C+replay+forever;Real+terminals+over+MCP+and+SKILLS" alt="SuperbTmr tagline">
+  </a>
   </a>
 </p>
 
@@ -43,6 +45,8 @@
 </p>
 
 <p align="center">
+  <a href="#introduction"><img src="https://img.shields.io/badge/Introduction-2786ff?style=flat-square" alt="Introduction"></a>
+  <a href="#experiment-platform"><img src="https://img.shields.io/badge/Experiment%20Platform-6E4AFF?style=flat-square" alt="Experiment Platform"></a>
   <a href="#features"><img src="https://img.shields.io/badge/Features-2786ff?style=flat-square" alt="Features"></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-2786ff?style=flat-square" alt="Quick Start"></a>
   <a href="#usage"><img src="https://img.shields.io/badge/Usage-2786ff?style=flat-square" alt="Usage"></a>
@@ -60,15 +64,23 @@
 
 ## Introduction
 
-SuperbTmr is a shared terminal workspace for remote labs and multi-machine courses. One instance puts every student, every teaching assistant, and every AI agent on the same real terminals — local or over SSH — behind a single browser page, with live observation, instant takeover, and a durable record of what actually happened.
+SuperbTmr is a **team experiment platform**. It takes the way research and engineering teams actually run experiments — scattered across personal terminals, hand-written scripts, `tmux` sessions and chat threads — and gives them one place: a declarative definition, automatic execution across every machine the team owns, live monitoring that notices when something hangs, artifacts pulled back automatically, and every run's full terminal output kept replayable forever.
 
-It is built around one observation: real technical work is almost never a single command. Compiling, debugging, configuring and installing are **multi-turn** interactions that need a terminal which stays alive. Yet AI agents can only fire one-shot commands, and teaching labs scatter their terminals across VNC, screen-sharing and hand-written scripts. SuperbTmr closes both gaps with one session layer:
+The reason it can do this is that it is built on a **real terminal session layer**, not a job scheduler. An experiment is not a fire-and-forget command. It is a sequence of multi-turn interactions: a build that prompts for confirmation, a REPL that must be driven line by line, an installer that asks `[Y/n]`, a login that needs a password and then an MFA code. SuperbTmr keeps a genuine terminal alive for each of those — on the local host or over SSH — and lets three kinds of user drive it:
 
 - **You (human)** — a browser-based Web UI for live observation and instant takeover of any session;
 - **AI Agents** — drive the same real terminals through **MCP** or **SKILLS**;
 - **Scripts / programs** — a full REST API plus WebSocket channel for programmatic session, forward, and file operations.
 
-On the platform layer, long-lived sessions with read-only replay, parallel multi-host / multi-session orchestration, and a full SSH connection lifecycle keep the whole loop **observable, programmable, and easy to hand off between human and AI**. Cross-platform and cloud-native, written in pure Go with no CGO: it ships as a single lightweight binary that runs persistently with low overhead, and goroutine concurrency keeps it high-throughput and low-latency.
+### Three layers, one binary
+
+| Layer | What it owns |
+| :--- | :--- |
+| **Terminal & session primitives** | Long-lived PTY / ConPTY sessions, local and over SSH, multi-host and multi-session, paged output, read-only replay of dead sessions, approval gates, server-side credentials, exit / silence / output notifications |
+| **Experiment orchestration** (`internal/exp`) | Declarative experiment definitions, automatic runner, hang detection, artifact collection, parameterised grid sweeps, schedules, audit trail |
+| **Entrances** | Web UI, MCP, SKILLS, REST + WebSocket — all sharing the same sessions |
+
+The experiment layer is deliberately thin. Launching a step, reading its output, waiting for it to finish, noticing it went quiet, gating it behind a human decision and pulling files back are all things the session, `notify`, approval and `sftp` packages already own. `internal/exp` composes them; it does not reimplement them.
 
 ### Demo Video
 
@@ -76,7 +88,28 @@ https://github.com/user-attachments/assets/d06a3c36-250a-4eeb-aefa-e80d13d1551c
 
 ## Why SuperbTmr
 
-### Multi-session visual management
+### The problem: experiments have no home
+
+Ask a team where an experiment lives and the answer is a screenshot, a chat thread, a shell history and somebody's laptop. The consequences are predictable:
+
+- **Not reproducible.** "It worked on my machine" is not a joke, it is the default. Nobody can re-run what ran last Tuesday.
+- **Not comparable.** Ten runs of the same sweep produce ten sets of numbers in ten places, with no way to line them up.
+- **Silently broken.** A run that hung at 3am looks exactly like a run that is still working. Somebody notices on Friday.
+- **Not shareable.** The one person who knows how to launch it is on leave.
+
+### The approach: make an experiment a first-class object
+
+SuperbTmr promotes an experiment from a shell script to a versioned, reviewable, replayable artefact:
+
+- **Declarative** — a JSON definition of targets, steps, expectations, metrics and artifacts. It lives in the repository next to the code, not in someone's history.
+- **Automatic** — the platform resolves connection profiles, opens the sessions, runs the steps in order and records what happened. Nobody has to sit and watch.
+- **Observable** — every step's status, exit code and duration is visible live, and a step that stops producing output for N seconds is declared *hung* rather than left looking busy.
+- **Recoverable** — a crashed or restarted run keeps its full terminal output, readable and replayable, so you pick up from where it broke instead of starting over.
+- **Governed** — dangerous experiments can be gated behind a human decision, and credentials never leave the platform, so an agent can run the whole thing without ever reading a password.
+
+### The foundation it grows out of
+
+None of the above would work on top of a job scheduler, because experiments are not jobs. SuperbTmr's session layer already provides the parts that are hard:
 
 A powerful Web UI manages many hosts and many sessions in one place: start it locally with a single command or deploy the container to the cloud — the browser gets the same interface either way.
 
@@ -98,7 +131,6 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 
 ![pic1](docs/assets/pic1.png)
 
-
 - **One session layer, peer entrances.** MCP, SKILLS and REST/WebSocket sit at the same level as the Web UI, sharing the same real sessions. You can watch every Agent step in the browser and take over at any time; the Agent in turn can pause and hand a password/MFA prompt to you.
 - **Built for token and turn budgets.** Tool schemas are compact and can be deferred-loaded (see [`docs/mcp-tools.md`](./docs/mcp-tools.md)); `shell_output` pages by tail/offset cursors so only the slices you ask for ever enter the context window; `shell_notify` sends a bare wake-up signal.
 - **Self-describing instances.** Every running SuperbTmr serves its own `/api.md` and `/skills.md` (no token needed) and registers them as MCP resources plus a `learn-api` prompt, so a fresh Agent can drive this exact instance straight away, using only these two files.
@@ -106,8 +138,67 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 - **Failure-tolerant, resumable work.** A closed, crashed or restarted session stays in the session list as a read-only DEAD tile with its output readable, so an Agent (or you) can pick up from the interrupted state; reconnecting the same `superbtmr://<entry>` starts a fresh session.
 - **Humans always keep the option to step in.** `notify_user` reaches you directly, privileged prompts are meant to be typed by you in the Web UI, and writes to one shell are serialized, so a human and an Agent can type on the same terminal with their inputs applied in order.
 
+## Experiment Platform
+
+### An experiment is a file, not a script
+
+```json
+{
+  "name": "resnet-finetune",
+  "description": "Fine-tune ResNet-18 on the CIFAR-10 split and report top-1.",
+  "params": [
+    { "name": "lr",     "values": ["0.001", "0.01"] },
+    { "name": "epochs", "default": "5" }
+  ],
+  "targets": [
+    { "ssh_config": "gpu-a", "role": "gpu" },
+    { "ssh_config": "gpu-b", "role": "gpu" }
+  ],
+  "steps": [
+    { "name": "prepare", "run": ["mkdir", "-p", "runs/{{lr}}"] },
+    { "name": "train",
+      "run": ["python", "train.py", "--lr", "{{lr}}", "--epochs", "{{epochs}}"],
+      "timeout_seconds": 3600,
+      "expect": { "exit_code": 0, "silence_timeout_seconds": 600 } },
+    { "name": "evaluate", "run": ["python", "eval.py"], "on_failure": "continue" }
+  ],
+  "metrics": [
+    { "name": "top1", "pattern": "top-1 accuracy: ([0-9.]+)", "step": "evaluate" }
+  ],
+  "artifacts": [ { "path": "runs/{{lr}}/model.pt" } ],
+  "notify": { "on_finish": true, "on_fail": true }
+}
+```
+
+Everything a run needs is in that file: which hosts, what to run, what counts as success, what to measure and what to bring home. `{{lr}}` placeholders are substituted per run, and any parameter carrying `values` becomes a **grid axis** — the example above launches two runs, one per learning rate.
+
+### What the platform does with it
+
+| Capability | How it works |
+| :--- | :--- |
+| **Automatic launch** | Resolves each `ssh_config` profile server-side, opens a session per target, runs the steps in order, records status, exit code and duration per step. |
+| **Hang detection** | A step that declares `silence_timeout_seconds` is judged hung when no output appears for that long — the same `silence` event the notification kernel already emits. |
+| **Live monitoring** | Step transitions are pushed over the existing WebSocket channel, so the dashboard and any watching agent see progress without polling. |
+| **Artifact collection** | Declared remote files are streamed back over SFTP and hashed, so a run's outputs are on the platform even after the host is gone. |
+| **Result extraction** | Regex metrics are pulled out of step output into a comparable number, so two runs of the same experiment can be lined up. |
+| **Replayable output** | Every node records the `session_id` / `shell_id` it ran on; the raw terminal output stays readable after the run ends. |
+| **Human gate** | `"approval": {"require": true}` holds a run until a person releases it in the Web UI. |
+| **Schedules & audit** | Cron triggers for recurring runs, and an audit trail of who launched or changed what. |
+
+### How the layer is put together
+
+| Phase | Scope |
+| :--- | :--- |
+| **Definition** | JSON experiment specs, parameter surface, grid sweeps, validation |
+| **Execution** | Run state machine, per-target nodes, sequential steps, exit-code and output expectations, timeouts |
+| **Monitoring** | Hang detection on silence, live step-status push, team notifications, MCP tools |
+| **Results** | Artifact collection over SFTP with hashing, metric extraction, cross-run comparison |
+| **Governance** | Cron schedules, approval gates, audit trail |
+
 ## Quick Navigation
 
+- [Introduction](#introduction)
+- [Experiment Platform](#experiment-platform)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
@@ -121,6 +212,13 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 
 ## Features
 
+- **🧪 Experiments as versioned files** — A JSON definition of targets, steps, expectations, metrics and artifacts lives in the repository next to the code. Every run records the spec version it came from, so a historical run can always be explained.
+- **🚀 Automatic execution** — The platform resolves connection profiles, opens one session per target, runs the steps in order and records status, exit code and duration for each. Nobody has to sit and watch.
+- **📡 Monitoring that notices hang** — A step declaring `silence_timeout_seconds` is declared *hung* when it stops producing output, instead of sitting there looking busy until somebody notices on Friday.
+- **🔁 Parameterised grid sweeps** — Any parameter carrying `values` becomes an axis; `{{param}}` placeholders are substituted per run. One file, dozens of runs, comparable results.
+- **📦 Artifacts pulled home** — Declared remote files are streamed back over SFTP and hashed, so a run's outputs survive the host.
+- **📈 Metrics out of the output** — Regex rules extract numbers from step output into a comparable value, so two runs of the same experiment can be lined up instead of eyeballed.
+- **⏱ Schedules** — Cron triggers for recurring runs, with the last run id kept on the schedule.
 - **⚡ One-command install, pure Go, no CGO** — `go install github.com/lisycotana/SuperbTmr@latest`; builds with `CGO_ENABLED=0` and binds no system shared libraries, so one static binary runs anywhere and cross-compiles natively (ConPTY on Windows, POSIX PTY on macOS / Linux — same behaviour everywhere).
 - **🔌 One port, four entrances** — Web UI (humans), MCP / SKILLS (Agents), and REST + WebSocket (scripts) share one port.
 - **🤝 Human–AI relay** — You and the Agent share one live session and you can take over or interrupt at any time; the Agent pauses at `sudo` / password / MFA prompts for you to type in the Web UI; input is serialized so keystrokes never collide.
@@ -130,9 +228,8 @@ An Agent natively runs only one-shot commands, while real work is largely **mult
 - **🟨 Multiple Agents, no lost output** — Parallel readers of one session keep independent cursors; a closed session (explicit close, exit, crash, or restart) stays in the registry as a read-only DEAD tile with its full output intact, so you can still replay, page through, or delete it whenever you like. After a drop, open a fresh session from the same entry (`superbtmr://<entry>`) and carry on.
 - **🟥 Proactive notifications, no polling** — `shell_notify` wakes the Agent on process exit, silence, or new output — signal only, no payload (pull the text when needed); `channel="sampling"` sends `sampling/createMessage` directly.
 - **🌐 Multi-language Web UI** — The interface follows the browser language on first load and can be overridden from the header; the choice is remembered, and switching never reloads the page or rebuilds open terminals.
-- **🔍 Optional review mode** — Under it, the Agent's command executions and file changes run only after human approval — for production hosts.
+- **🔍 Optional review mode** — Under it, the Agent's command executions and file changes run only after human approval — for production hosts. Experiments can opt into the same gate with `"approval": {"require": true}`.
 - **🔒 Credential-safe by design** — Passwords, private keys, and passphrases written through `ssh_config` are never readable back, so plaintext never enters the Agent's context; config-writing tools stay off unless `--mcp-manage-ssh-configs` is set.
-
 ## Quick Start
 
 ### Quick Install (Go toolchain required)
