@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2786FF"/>
+      <stop offset="1" stop-color="#6E4AFF"/>
+    </linearGradient>
+    <marker id="m1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#2786FF"/>
+    </marker>
+    <marker id="m2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#6E4AFF"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="520" fill="#FAFBFD"/>
+  <text x="40" y="34" font-size="13" font-weight="700" fill="#8A94A6" letter-spacing="1.2">图 4-1　三层架构：原语已就绪，工作流层编排其上</text>
+
+  <!-- ============ Layer 1: entrance ============ -->
+  <g>
+    <rect x="40" y="56" width="1120" height="104" rx="12" fill="#fff" stroke="#D7DEEA"/>
+    <rect x="40" y="56" width="4" height="104" rx="2" fill="#22C55E"/>
+    <text x="62" y="82" font-size="14" font-weight="700" fill="#1F2733">入口层</text>
+    <text x="62" y="101" font-size="11.5" fill="#8A94A6">三类用户驱动同一批真实会话 —— 无状态分叉</text>
+
+    <g font-size="12.5" font-weight="600" text-anchor="middle">
+      <rect x="330" y="70" width="170" height="72" rx="9" fill="#F0FDF4" stroke="#BBF7D0"/>
+      <text x="415" y="100" fill="#15803D">人</text>
+      <text x="415" y="122" font-size="11" font-weight="500" fill="#4ADE80">浏览器 Web UI</text>
+
+      <rect x="530" y="70" width="170" height="72" rx="9" fill="#EFF6FF" stroke="#BFDBFE"/>
+      <text x="615" y="100" fill="#1D4ED8">AI Agent</text>
+      <text x="615" y="122" font-size="11" font-weight="500" fill="#60A5FA">MCP · SKILLS</text>
+
+      <rect x="730" y="70" width="170" height="72" rx="9" fill="#FAF5FF" stroke="#E9D5FF"/>
+      <text x="815" y="100" fill="#7E22CE">脚本 / 程序</text>
+      <text x="815" y="122" font-size="11" font-weight="500" fill="#C084FC">REST · WebSocket</text>
+    </g>
+    <text x="940" y="112" font-size="11.5" fill="#8A94A6" text-anchor="middle">同一端口</text>
+  </g>
+
+  <!-- arrow down -->
+  <path d="M600,160 L600,182" stroke="#22C55E" stroke-width="1.8" marker-end="url(#m1)"/>
+  <text x="612" y="175" font-size="11" fill="#8A94A6">共用同一批会话</text>
+
+  <!-- ============ Layer 2: workflow ============ -->
+  <g>
+    <rect x="40" y="184" width="1120" height="150" rx="12" fill="#fff" stroke="#D7DEEA"/>
+    <rect x="40" y="184" width="4" height="150" rx="2" fill="url(#lg)"/>
+    <text x="62" y="210" font-size="14" font-weight="700" fill="#1F2733">工作流层</text>
+    <text x="62" y="229" font-size="11.5" fill="#8A94A6">刻意做薄：只编排，不重新实现</text>
+
+    <g font-size="12.5" font-weight="600" text-anchor="middle">
+      <!-- internal/exp -->
+      <rect x="330" y="198" width="270" height="120" rx="9" fill="#F5F8FF" stroke="#C9DBFF"/>
+      <text x="465" y="222" font-size="12.5" font-weight="700" fill="#2B5FD9">internal/exp</text>
+      <text x="465" y="246" font-size="11" font-weight="500" fill="#5B6B85">声明式定义 · 运行状态机</text>
+      <text x="465" y="266" font-size="11" font-weight="500" fill="#5B6B85">顺序步骤 · 判据 · 超时</text>
+      <text x="465" y="286" font-size="11" font-weight="500" fill="#5B6B85">卡死检出 · 产物 · 指标</text>
+      <text x="465" y="306" font-size="11" font-weight="500" fill="#5B6B85">定时 · 审批 · 审计</text>
+
+      <!-- internal/fleet -->
+      <rect x="630" y="198" width="270" height="120" rx="9" fill="#F5F8FF" stroke="#C9DBFF"/>
+      <text x="765" y="222" font-size="12.5" font-weight="700" fill="#2B5FD9">internal/fleet</text>
+      <text x="765" y="246" font-size="11" font-weight="500" fill="#5B6B85">主机清单 · GPU 清单</text>
+      <text x="765" y="266" font-size="11" font-weight="500" fill="#5B6B85">租约 + 心跳 + 超时回收</text>
+      <text x="765" y="286" font-size="11" font-weight="500" fill="#5B6B85">最佳匹配主机选择</text>
+      <text x="765" y="306" font-size="11" font-weight="500" fill="#5B6B85">无空位排队（原因可见）</text>
+
+      <!-- placement result -->
+      <rect x="930" y="198" width="210" height="120" rx="9" fill="#EEF3FF" stroke="#C9DBFF"/>
+      <text x="1035" y="228" font-size="12" font-weight="700" fill="#2B5FD9">放置结果</text>
+      <text x="1035" y="252" font-size="11" font-weight="500" fill="#5B6B85">选中主机</text>
+      <text x="1035" y="272" font-size="11" font-weight="500" fill="#5B6B85">+ 租用的卡</text>
+      <text x="1035" y="292" font-size="11" font-weight="500" fill="#5B6B85">+ 决策理由</text>
+      <text x="1035" y="312" font-size="10.5" font-weight="500" fill="#8A94A6">注入 CUDA_VISIBLE_DEVICES</text>
+    </g>
+
+    <!-- exp -> fleet arrow -->
+    <path d="M600,258 L626,258" stroke="#6E4AFF" stroke-width="1.6" marker-end="url(#m2)"/>
+    <path d="M900,258 L926,258" stroke="#6E4AFF" stroke-width="1.6" marker-end="url(#m2)"/>
+  </g>
+
+  <!-- arrow down -->
+  <path d="M600,334 L600,356" stroke="#2786FF" stroke-width="1.8" marker-end="url(#m1)"/>
+  <text x="612" y="349" font-size="11" fill="#8A94A6">复用原语，不新建执行通道</text>
+
+  <!-- ============ Layer 3: primitives ============ -->
+  <g>
+    <rect x="40" y="358" width="1120" height="120" rx="12" fill="#fff" stroke="#D7DEEA"/>
+    <rect x="40" y="358" width="4" height="120" rx="2" fill="#2786FF"/>
+    <text x="62" y="384" font-size="14" font-weight="700" fill="#1F2733">原语层</text>
+    <text x="62" y="403" font-size="11.5" fill="#8A94A6">终端与会话能力，已就绪</text>
+
+    <g font-size="11.5" font-weight="600" text-anchor="middle">
+      <rect x="330" y="372" width="130" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="395" y="410" fill="#334155">session</text>
+      <text x="395" y="430" font-size="10" font-weight="500" fill="#94A3B8">长驻 PTY/ConPTY</text>
+      <text x="395" y="446" font-size="10" font-weight="500" fill="#94A3B8">多主机多会话</text>
+
+      <rect x="475" y="372" width="130" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="540" y="410" fill="#334155">shell</text>
+      <text x="540" y="430" font-size="10" font-weight="500" fill="#94A3B8">分页输出</text>
+      <text x="540" y="446" font-size="10" font-weight="500" fill="#94A3B8">DEAD 只读回放</text>
+
+      <rect x="620" y="372" width="130" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="685" y="410" fill="#334155">notify</text>
+      <text x="685" y="430" font-size="10" font-weight="500" fill="#94A3B8">exit / silence</text>
+      <text x="685" y="446" font-size="10" font-weight="500" fill="#94A3B8">output 三类事件</text>
+
+      <rect x="765" y="372" width="130" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="830" y="410" fill="#334155">approval</text>
+      <text x="830" y="430" font-size="10" font-weight="500" fill="#94A3B8">审批队列</text>
+      <text x="830" y="446" font-size="10" font-weight="500" fill="#94A3B8">fail-closed</text>
+
+      <rect x="910" y="372" width="130" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="975" y="410" fill="#334155">sftp</text>
+      <text x="975" y="430" font-size="10" font-weight="500" fill="#94A3B8">流式读写</text>
+      <text x="975" y="446" font-size="10" font-weight="500" fill="#94A3B8">可续传 HTTP</text>
+
+      <rect x="1055" y="372" width="105" height="94" rx="8" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="1107" y="410" fill="#334155">forward</text>
+      <text x="1107" y="430" font-size="10" font-weight="500" fill="#94A3B8">-L / -R / -D</text>
+    </g>
+
+    <!-- credential note -->
+    <text x="62" y="452" font-size="10.5" fill="#8A94A6">凭据服务端持有 · 不可读回</text>
+  </g>
+
+  <!-- arrow down -->
+  <path d="M600,478 L600,498" stroke="#2786FF" stroke-width="1.8" marker-end="url(#m1)"/>
+
+  <!-- ============ targets ============ -->
+  <g>
+    <rect x="330" y="498" width="570" height="0" rx="8" fill="none"/>
+    <rect x="330" y="498" width="270" height="0" rx="8" fill="none"/>
+    <text x="600" y="514" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">目标主机：本机（internal loopback SSH） · 任意 SSH profile 主机</text>
+  </g>
+</svg>
